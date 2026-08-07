@@ -3,11 +3,71 @@ package handlers
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 
+	"golang.org/x/crypto/bcrypt"
+
 	"ugss-command-center-backend/internal/repository"
 )
+
+// ==========================================
+// LOGIN HANDLER
+// ==========================================
+
+type LoginRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+type LoginResponse struct {
+	Username string   `json:"username"`
+	Role     string   `json:"role"`
+	Modules  []string `json:"modules"`
+}
+
+func LoginHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req LoginRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			return
+		}
+
+		var hash, role string
+		var modulesJSON []byte
+		err := db.QueryRow("SELECT password_hash, role, allowed_modules FROM app_users WHERE username = $1", req.Username).Scan(&hash, &role, &modulesJSON)
+		if err == sql.ErrNoRows {
+			http.Error(w, "Invalid credentials", http.StatusUnauthorized)
+			return
+		} else if err != nil {
+			http.Error(w, "Database error", http.StatusInternalServerError)
+			return
+		}
+
+		if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(req.Password)); err != nil {
+			http.Error(w, "Invalid credentials", http.StatusUnauthorized)
+			return
+		}
+
+		var modules []string
+		if err := json.Unmarshal(modulesJSON, &modules); err != nil {
+			http.Error(w, "Error parsing modules", http.StatusInternalServerError)
+			return
+		}
+
+		resp := LoginResponse{
+			Username: req.Username,
+			Role:     role,
+			Modules:  modules,
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}
+}
 
 // ==========================================
 // USER HANDLERS
@@ -166,7 +226,8 @@ func GetComplaintsByStatusHandler(db *sql.DB) http.HandlerFunc {
 func GetStatusCountsHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		date := r.URL.Query().Get("date")
-		data, err := repository.GetStatusCounts(db, date)
+		role := r.URL.Query().Get("role")
+		data, err := repository.GetStatusCounts(db, date, role)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -180,7 +241,8 @@ func GetStatusCountsHandler(db *sql.DB) http.HandlerFunc {
 func GetComplaintTypeStatsHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		date := r.URL.Query().Get("date")
-		data, err := repository.GetComplaintTypeStats(db, date)
+		role := r.URL.Query().Get("role")
+		data, err := repository.GetComplaintTypeStats(db, date, role)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -222,7 +284,8 @@ func GetSLATrendHandler(db *sql.DB) http.HandlerFunc {
 func GetAllComplaintsHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		date := r.URL.Query().Get("date")
-		complaints, err := repository.GetAllComplaints(db, date)
+		role := r.URL.Query().Get("role")
+		complaints, err := repository.GetAllComplaints(db, date, role)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -230,6 +293,30 @@ func GetAllComplaintsHandler(db *sql.DB) http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(complaints)
+	}
+}
+
+func CreateComplaintHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req repository.CreateComplaintRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid payload", http.StatusBadRequest)
+			return
+		}
+		
+		newID, err := repository.CreateComplaint(db, req)
+		if err != nil {
+			log.Printf("Failed to create complaint: %v", err)
+			http.Error(w, "Database error", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"message": "Complaint created successfully",
+			"id":      newID,
+		})
 	}
 }
 
@@ -402,3 +489,112 @@ func GetSTPLogsHandler(db *sql.DB) http.HandlerFunc {
 		json.NewEncoder(w).Encode(logs)
 	}
 }
+
+// ==========================================
+// ASSIGN OFFICER HANDLER
+// ==========================================
+
+type AssignOfficerRequest struct {
+	PhoneNumber string `json:"phone_number"`
+	Name        string `json:"name"`
+	Password    string `json:"password"`
+	AssignedBy  string `json:"assigned_by"` // "ae1" or "ae2"
+}
+
+func AssignOfficerHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req AssignOfficerRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid request payload", http.StatusBadRequest)
+			return
+		}
+
+		if req.PhoneNumber == "" || req.Name == "" || req.Password == "" {
+			http.Error(w, "Missing required fields", http.StatusBadRequest)
+			return
+		}
+
+		// Hash password
+		hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+		if err != nil {
+			log.Printf("Error processing password: %v", err)
+			http.Error(w, "Error processing password", http.StatusInternalServerError)
+			return
+		}
+
+		tableName := ""
+		if req.AssignedBy == "ae1" {
+			tableName = "ae1_field_teams"
+		} else if req.AssignedBy == "ae2" {
+			tableName = "ae2_field_teams"
+		} else {
+			http.Error(w, "Invalid assigner role. Must be ae1 or ae2", http.StatusBadRequest)
+			return
+		}
+
+		// Insert into DB
+		query := fmt.Sprintf(`
+			INSERT INTO %s (phone_number, team_name, password_hash, is_active, created_at)
+			VALUES ($1, $2, $3, true, NOW())
+		`, tableName)
+
+		_, err = db.ExecContext(r.Context(), query, req.PhoneNumber, req.Name, string(hash))
+		if err != nil {
+			log.Printf("Failed to assign officer: %v", err)
+			http.Error(w, "Database error", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]string{"message": "Officer assigned successfully"})
+	}
+}
+
+// ==========================================
+// GET OFFICERS HANDLER
+// ==========================================
+
+type OfficerResponse struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+func GetOfficersHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		role := r.URL.Query().Get("role")
+		var query string
+		if role == "ae1" {
+			query = `SELECT phone_number, team_name FROM ae1_field_teams WHERE is_active = true`
+		} else if role == "ae2" {
+			query = `SELECT phone_number, team_name FROM ae2_field_teams WHERE is_active = true`
+		} else if role == "admin" || role == "citizen" || role == "" {
+			query = `SELECT phone_number, team_name FROM ae1_field_teams WHERE is_active = true UNION SELECT phone_number, team_name FROM ae2_field_teams WHERE is_active = true`
+		} else {
+			http.Error(w, "Invalid role parameter", http.StatusBadRequest)
+			return
+		}
+
+		rows, err := db.Query(query)
+		if err != nil {
+			log.Printf("Failed to fetch officers: %v", err)
+			http.Error(w, "Database error", http.StatusInternalServerError)
+			return
+		}
+		defer rows.Close()
+
+		var officers []OfficerResponse
+		for rows.Next() {
+			var o OfficerResponse
+			if err := rows.Scan(&o.ID, &o.Name); err != nil {
+				log.Printf("Failed to scan officer: %v", err)
+				continue
+			}
+			officers = append(officers, o)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(officers)
+	}
+}
+

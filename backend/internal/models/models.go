@@ -262,3 +262,33 @@ type OfficerStats struct {
 	SLACompliancePercent float64 `json:"sla_compliance_percent"`
 	Score                float64 `json:"score"`
 }
+
+// ==========================================
+// NEW DB SCHEMAS FOR CIVICAPPFINAL
+// ==========================================
+
+type DBFieldOfficer struct {
+	OfficerID   int       `json:"officer_id"`
+	ModuleID    int       `json:"module_id"`
+	OfficerName string    `json:"officer_name"`
+	PhoneNumber string    `json:"phone_number"`
+	WardFrom    int       `json:"ward_from"`
+	WardTo      int       `json:"ward_to"`
+	IsActive    bool      `json:"is_active"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+type DBComplaintUpdate struct {
+	UpdateID    int       `json:"update_id"`
+	ComplaintID string    `json:"complaint_id"`
+	OfficerID   int       `json:"officer_id"`
+	OldStatus   string    `json:"old_status"`
+	NewStatus   string    `json:"new_status"`
+	Remarks     string    `json:"remarks"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type DBModule struct {
+	ModuleID   int    `json:"module_id"`
+	ModuleName string `json:"module_name"`
+}

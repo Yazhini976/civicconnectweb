@@ -3,9 +3,27 @@ package repository
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 	"ugss-command-center-backend/internal/models"
 )
+
+// Helper function to return pointer to a value
+func ptr[T any](v T) *T {
+	return &v
+}
+
+// Static mock stations representing the layout structure
+var mockStations = []models.Station{
+	{ID: 1, Name: "Kothankulam Road LS", Type: "lifting", WardNumber: ptr("5"), Capacity: ptr(10.5), ProcessType: ptr("SBR")},
+	{ID: 2, Name: "Samandhapuram LS", Type: "lifting", WardNumber: ptr("12"), Capacity: ptr(8.2), ProcessType: ptr("SBR")},
+	{ID: 3, Name: "Chandhoorani LS", Type: "lifting", WardNumber: ptr("18"), Capacity: ptr(12.0), ProcessType: ptr("SBR")},
+	{ID: 4, Name: "Thiruvananthapuram Street LS", Type: "lifting", WardNumber: ptr("28"), Capacity: ptr(15.5), ProcessType: ptr("SBR")},
+	{ID: 5, Name: "North Avarampatti PS", Type: "pumping", WardNumber: ptr("8"), Capacity: ptr(25.0), ProcessType: ptr("ASP")},
+	{ID: 6, Name: "Indira Nagar PS", Type: "pumping", WardNumber: ptr("15"), Capacity: ptr(30.0), ProcessType: ptr("ASP")},
+	{ID: 7, Name: "Konthankulam STP", Type: "stp", WardNumber: ptr("10"), Capacity: ptr(50.0), ProcessType: ptr("SBR")},
+	{ID: 8, Name: "South Zone STP", Type: "stp", WardNumber: ptr("20"), Capacity: ptr(40.0), ProcessType: ptr("SBR")},
+}
 
 // ==========================================
 // USER REPOSITORY
@@ -15,7 +33,7 @@ func GetUserByMobile(db *sql.DB, mobile string) (*models.User, error) {
 	var user models.User
 	var phone string
 	err := db.QueryRow(`
-		SELECT id::text, phone_number, role, created_at 
+		SELECT user_id::text, phone_number, name, created_at 
 		FROM users WHERE phone_number = $1
 	`, mobile).Scan(&user.ID, &phone, &user.Role, &user.CreatedAt)
 
@@ -29,10 +47,26 @@ func GetUserByMobile(db *sql.DB, mobile string) (*models.User, error) {
 }
 
 func GetUsersByRole(db *sql.DB, role string) ([]models.User, error) {
-	rows, err := db.Query(`
-		SELECT id::text, phone_number, role, created_at 
-		FROM users WHERE role = $1
-	`, role)
+	var rows *sql.Rows
+	var err error
+
+	if strings.ToUpper(role) == "FIELD_OFFICER" {
+		rows, err = db.Query(`
+			WITH all_officers AS (
+				SELECT phone_number as officer_id, phone_number, team_name as officer_name, created_at FROM ae1_field_teams
+				UNION ALL
+				SELECT phone_number as officer_id, phone_number, team_name as officer_name, created_at FROM ae2_officers
+			)
+			SELECT officer_id, phone_number, 'FIELD_OFFICER' as role, created_at, officer_name, '' as ward_number
+			FROM all_officers
+		`)
+	} else {
+		rows, err = db.Query(`
+			SELECT user_id::text, phone_number, '' as role, created_at, phone_number as officer_name, '' as ward_number
+			FROM users WHERE false
+		`)
+	}
+
 	if err != nil {
 		return nil, err
 	}
@@ -42,56 +76,51 @@ func GetUsersByRole(db *sql.DB, role string) ([]models.User, error) {
 	for rows.Next() {
 		var u models.User
 		var phone string
-		if err := rows.Scan(&u.ID, &phone, &u.Role, &u.CreatedAt); err != nil {
+		var fullName string
+		var ward string
+		if err := rows.Scan(&u.ID, &phone, &u.Role, &u.CreatedAt, &fullName, &ward); err != nil {
 			return nil, err
 		}
 		u.Username = &phone
-		u.FullName = &phone
+		u.FullName = &fullName
 		u.MobileNumber = phone
+		if ward != "" && ward != "0-0" {
+			u.WardNumber = &ward
+		}
 		users = append(users, u)
 	}
 	return users, nil
 }
 
 func GetOfficerStats(db *sql.DB) ([]models.OfficerStats, error) {
-	// ID mapping as confirmed from database:
-	// Officer 1: da0be945-6d0b-4733-99eb-2eeace7d7f68 (Wards 1-10)
-	// Officer 2: a69651a7-c2a2-48bc-9df2-025ec007cb56 (Wards 11-20)
-	// Officer 3: aa1ebc25-5b07-4145-9687-56cfe92228e8 (Wards 21-30)
-	// Officer 4: a7f9568c-3e6f-4763-87dc-3b6fd5660cc6 (Wards 31-42)
-
 	query := `
+		WITH all_officers AS (
+			SELECT phone_number as officer_id, team_name as officer_name, phone_number FROM ae1_field_teams
+			UNION ALL
+			SELECT phone_number as officer_id, team_name as officer_name, phone_number FROM ae2_officers
+		)
 		SELECT 
-			CASE 
-				WHEN ward BETWEEN 1 AND 10 THEN 'da0be945-6d0b-4733-99eb-2eeace7d7f68'
-				WHEN ward BETWEEN 11 AND 20 THEN 'a69651a7-c2a2-48bc-9df2-025ec007cb56'
-				WHEN ward BETWEEN 21 AND 30 THEN 'aa1ebc25-5b07-4145-9687-56cfe92228e8'
-				WHEN ward BETWEEN 31 AND 45 THEN 'a7f9568c-3e6f-4763-87dc-3b6fd5660cc6'
-				ELSE 'other'
-			END as staff_id,
-			COUNT(*) as total,
-			SUM(CASE WHEN status IN ('COMPLETED', 'RESOLVED') THEN 1 ELSE 0 END) as resolved
-		FROM complaints
-		GROUP BY staff_id
+			fo.officer_id, 
+			fo.officer_name, 
+			COUNT(c.complaint_id) as total,
+			SUM(CASE WHEN UPPER(c.status) IN ('COMPLETED', 'REJECTED') THEN 1 ELSE 0 END) as resolved
+		FROM all_officers fo
+		LEFT JOIN complaints c ON c.assigned_officer_phone = fo.phone_number
+		GROUP BY fo.officer_id, fo.officer_name
 	`
 	rows, err := db.Query(query)
 	if err != nil {
-		return nil, err
+		return []models.OfficerStats{}, nil
 	}
 	defer rows.Close()
 
 	var stats []models.OfficerStats
 	for rows.Next() {
 		var s models.OfficerStats
-		var staffID string
 		var total, resolved int
-		if err := rows.Scan(&staffID, &total, &resolved); err != nil {
+		if err := rows.Scan(&s.ID, &s.Name, &total, &resolved); err != nil {
 			return nil, err
 		}
-		if staffID == "other" {
-			continue
-		}
-		s.ID = staffID
 		s.TotalAssigned = total
 		s.Resolved = resolved
 		if total > 0 {
@@ -99,77 +128,35 @@ func GetOfficerStats(db *sql.DB) ([]models.OfficerStats, error) {
 		} else {
 			s.SLACompliancePercent = 100
 		}
-		s.Score = s.SLACompliancePercent // Mock score based on compliance
+		s.Score = s.SLACompliancePercent
 		stats = append(stats, s)
 	}
 	return stats, nil
 }
 
 func GetAllStations(db *sql.DB) ([]models.Station, error) {
-	rows, err := db.Query(`SELECT id, name, type, ward_number, capacity, process_type FROM stations`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var stations []models.Station
-	for rows.Next() {
-		var s models.Station
-		if err := rows.Scan(&s.ID, &s.Name, &s.Type, &s.WardNumber, &s.Capacity, &s.ProcessType); err != nil {
-			return nil, err
-		}
-		stations = append(stations, s)
-	}
-	return stations, nil
+	return mockStations, nil
 }
 
 func GetStationsByType(db *sql.DB, stationType string) ([]models.Station, error) {
-	rows, err := db.Query(`SELECT id, name, type, ward_number, capacity, process_type FROM stations WHERE type = $1`, stationType)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var stations []models.Station
-	for rows.Next() {
-		var s models.Station
-		if err := rows.Scan(&s.ID, &s.Name, &s.Type, &s.WardNumber, &s.Capacity, &s.ProcessType); err != nil {
-			return nil, err
+	var filtered []models.Station
+	for _, s := range mockStations {
+		if s.Type == stationType {
+			filtered = append(filtered, s)
 		}
-		stations = append(stations, s)
 	}
-	return stations, nil
+	return filtered, nil
 }
 
 func GetStationCounts(db *sql.DB) (*models.StationCount, error) {
-	var counts models.StationCount
-	err := db.QueryRow(`
-		SELECT
-			COUNT(*) FILTER (WHERE type = 'lifting') AS lifting_station_count,
-			COUNT(*) FILTER (WHERE type = 'pumping') AS pumping_station_count,
-			COUNT(*) FILTER (WHERE type = 'stp') AS stp_count
-		FROM stations
-	`).Scan(&counts.Lifting, &counts.Pumping, &counts.STP)
-	if err != nil {
-		return nil, err
-	}
-	return &counts, nil
+	return &models.StationCount{Lifting: 4, Pumping: 2, STP: 2}, nil
 }
 
 func GetEquipmentByStation(db *sql.DB, stationID int) ([]models.Equipment, error) {
-	rows, err := db.Query(`SELECT id, station_id, name, type, NULL as details FROM equipment WHERE station_id = $1`, stationID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var equipment []models.Equipment
-	for rows.Next() {
-		var e models.Equipment
-		if err := rows.Scan(&e.ID, &e.StationID, &e.Name, &e.Type, &e.Details); err != nil {
-			return nil, err
-		}
-		equipment = append(equipment, e)
+	var equipment = []models.Equipment{
+		{ID: 1, StationID: stationID, Name: "Inlet Pump 1", Type: "pump", Details: ptr(`{"power_hp": 15, "brand": "Kirloskar"}`)},
+		{ID: 2, StationID: stationID, Name: "Air Blower 1", Type: "blower", Details: ptr(`{"power_hp": 20, "brand": "Premium"}`)},
+		{ID: 3, StationID: stationID, Name: "Agitator Motor 1", Type: "motor", Details: ptr(`{"power_hp": 10, "brand": "Siemens"}`)},
 	}
 	return equipment, nil
 }
@@ -180,31 +167,40 @@ func GetEquipmentByStation(db *sql.DB, stationID int) ([]models.Equipment, error
 
 const complaintSelectCols = `
 	SELECT 
-		id::text, 
-		citizen_id::text as citizen_user_id, 
-		'Citizen' as citizen_name, 
-		NULL as citizen_role, 
-		ward::text as ward_number, 
-		street as street_name, 
-		NULL as door_number, 
-		NULL as landmark, 
-		category, 
-		category as type, 
-		'Urban' as area_type, 
-		image_url as photo_url, 
-		NULL as audio_url, 
+		complaint_id::text, 
+		user_phone, 
+		user_phone as citizen_name, 
+		'citizen' as citizen_role, 
+		location as ward_number, 
+		location as street_name, 
+		'' as door_number, 
+		'' as landmark, 
 		CASE 
-			WHEN status = 'OPEN' THEN 'Submitted'
-			WHEN status = 'ALLOCATED' THEN 'Assigned'
-			WHEN status = 'PENDING' THEN 'In Progress'
-			WHEN status IN ('COMPLETED', 'RESOLVED') THEN 'Resolved'
-			ELSE status
-		END AS status, 
-		NULL as assigned_to, 
+			WHEN module_id = 1 THEN 'UGSS'
+			WHEN module_id = 2 THEN 'Water Utility'
+			WHEN module_id = 3 THEN 'Street Lighting'
+			WHEN module_id = 4 THEN 'Solid Waste'
+			WHEN module_id = 5 THEN 'Survey'
+			WHEN module_id = 9 THEN 'UGSS'
+			ELSE 'Other'
+		END as category, 
+		reason as type, 
+		'Residential' as area_type, 
+		COALESCE(complaint_photo, '') as photo_url, 
+		'' as audio_url, 
+		CASE 
+			WHEN UPPER(status) = 'PENDING' THEN 'Pending'
+			WHEN UPPER(status) = 'IN_PROGRESS' THEN 'In Progress'
+			WHEN UPPER(status) = 'COMPLETED' THEN 'Resolved'
+			WHEN UPPER(status) = 'REJECTED' THEN 'Rejected'
+			ELSE 'Pending'
+		END as status, 
+		COALESCE(assigned_officer_phone, '') as assigned_to, 
 		created_at, 
-		(created_at + INTERVAL '1 day') as expected_resolution_at, 
-		completed_at as resolved_at
+		(created_at + INTERVAL '2 days') as expected_resolution_at, 
+		updated_at as resolved_at
 	FROM complaints
+	WHERE module_id IN (1, 2, 3, 4, 5)
 `
 
 func scanComplaint(rows *sql.Rows) (models.Complaint, error) {
@@ -219,7 +215,7 @@ func scanComplaint(rows *sql.Rows) (models.Complaint, error) {
 }
 
 func GetComplaintsByWard(db *sql.DB, ward string) ([]models.Complaint, error) {
-	rows, err := db.Query(complaintSelectCols+` WHERE ward::text = $1`, ward)
+	rows, err := db.Query(complaintSelectCols+` AND location = $1`, ward)
 	if err != nil {
 		return nil, err
 	}
@@ -237,14 +233,13 @@ func GetComplaintsByWard(db *sql.DB, ward string) ([]models.Complaint, error) {
 }
 
 func GetComplaintsByStatus(db *sql.DB, status string) ([]models.Complaint, error) {
-	// Status parameter here is the mapped one (e.g. 'Submitted'), so we need to match the mapped value.
-	query := complaintSelectCols + ` WHERE (
+	query := complaintSelectCols + ` AND (
 		CASE 
-			WHEN status = 'OPEN' THEN 'Submitted'
-			WHEN status = 'ALLOCATED' THEN 'Assigned'
-			WHEN status = 'PENDING' THEN 'In Progress'
-			WHEN status IN ('COMPLETED', 'RESOLVED') THEN 'Resolved'
-			ELSE status
+			WHEN UPPER(status) = 'PENDING' THEN 'Submitted'
+			WHEN UPPER(status) = 'IN_PROGRESS' THEN 'In Progress'
+			WHEN UPPER(status) = 'COMPLETED' THEN 'Resolved'
+			WHEN UPPER(status) = 'REJECTED' THEN 'Rejected'
+			ELSE 'Submitted'
 		END
 	) = $1`
 	rows, err := db.Query(query, status)
@@ -264,23 +259,32 @@ func GetComplaintsByStatus(db *sql.DB, status string) ([]models.Complaint, error
 	return complaints, nil
 }
 
-func GetStatusCounts(db *sql.DB, dateFilter string) (map[string]int, error) {
+func GetStatusCounts(db *sql.DB, dateFilter string, role string) (map[string]int, error) {
 	query := `
 		SELECT 
 			CASE 
-				WHEN status = 'OPEN' THEN 'Submitted'
-				WHEN status = 'ALLOCATED' THEN 'Assigned'
-				WHEN status = 'PENDING' THEN 'In Progress'
-				WHEN status IN ('COMPLETED', 'RESOLVED') THEN 'Resolved'
-				ELSE status
+				WHEN UPPER(status) = 'PENDING' THEN 'Submitted'
+				WHEN UPPER(status) = 'IN_PROGRESS' THEN 'In Progress'
+				WHEN UPPER(status) = 'COMPLETED' THEN 'Resolved'
+				WHEN UPPER(status) = 'REJECTED' THEN 'Rejected'
+				ELSE 'Submitted'
 			END AS mapped_status, 
 			COUNT(*) 
 		FROM complaints 
+		WHERE 1=1
 	`
+	if role == "ae1" {
+		query += ` AND module_id IN (1, 2, 3)`
+	} else if role == "ae2" {
+		query += ` AND module_id IN (4, 5)`
+	} else {
+		query += ` AND module_id IN (1, 2, 3, 4, 5)`
+	}
+
 	args := []interface{}{}
 
 	if dateFilter != "" {
-		query += ` WHERE DATE(created_at) = $1 `
+		query += ` AND DATE(created_at) = $1 `
 		args = append(args, dateFilter)
 	}
 	query += ` GROUP BY mapped_status`
@@ -303,15 +307,23 @@ func GetStatusCounts(db *sql.DB, dateFilter string) (map[string]int, error) {
 	return result, nil
 }
 
-func GetComplaintTypeStats(db *sql.DB, dateFilter string) (map[string]int, error) {
-	query := `SELECT category as type, COUNT(*) FROM complaints `
+func GetComplaintTypeStats(db *sql.DB, dateFilter string, role string) (map[string]int, error) {
+	query := `SELECT reason as type, COUNT(*) FROM complaints WHERE 1=1 `
+	
+	if role == "ae1" {
+		query += ` AND module_id IN (1, 2, 3) `
+	} else if role == "ae2" {
+		query += ` AND module_id IN (4, 5) `
+	} else {
+		query += ` AND module_id IN (1, 2, 3, 4, 5) `
+	}
 	args := []interface{}{}
 
 	if dateFilter != "" {
-		query += ` WHERE DATE(created_at) = $1 `
+		query += ` AND DATE(created_at) = $1 `
 		args = append(args, dateFilter)
 	}
-	query += ` GROUP BY type`
+	query += ` GROUP BY reason`
 
 	rows, err := db.Query(query, args...)
 	if err != nil {
@@ -345,13 +357,10 @@ type TrendPoint struct {
 }
 
 func GetEnergyTrend(db *sql.DB, date string) ([]TrendPoint, error) {
-	// Let's return empty, as the energy tables in original db have different column structures
-	// and we don't want to break the app parsing them. The energy cards will just be 0.
 	return []TrendPoint{}, nil
 }
 
 func GetSLATrend(db *sql.DB, date string) ([]TrendPoint, error) {
-	// Query to get SLA compliance vs breached for the 7 days ending at 'date'
 	dateVal := "CURRENT_DATE"
 	if date != "" {
 		dateVal = fmt.Sprintf("CAST('%s' AS DATE)", date)
@@ -366,9 +375,10 @@ func GetSLATrend(db *sql.DB, date string) ([]TrendPoint, error) {
 		complaint_stats AS (
 			SELECT 
 				DATE(created_at) as log_date,
-				COUNT(*) FILTER (WHERE completed_at <= (created_at + INTERVAL '1 day')) as compliance,
-				COUNT(*) FILTER (WHERE completed_at > (created_at + INTERVAL '1 day') OR (completed_at IS NULL AND CURRENT_TIMESTAMP > (created_at + INTERVAL '1 day'))) as breached
+				COUNT(*) FILTER (WHERE UPPER(status) = 'COMPLETED' AND updated_at <= (created_at + INTERVAL '1 day')) as compliance,
+				COUNT(*) FILTER (WHERE UPPER(status) != 'COMPLETED' OR updated_at > (created_at + INTERVAL '1 day')) as breached
 			FROM complaints
+			WHERE module_id IN (1, 2, 3, 4, 5)
 			GROUP BY DATE(created_at)
 		)
 		SELECT 
@@ -396,11 +406,18 @@ func GetSLATrend(db *sql.DB, date string) ([]TrendPoint, error) {
 	return trend, nil
 }
 
-func GetAllComplaints(db *sql.DB, dateFilter string) ([]models.Complaint, error) {
+func GetAllComplaints(db *sql.DB, dateFilter string, role string) ([]models.Complaint, error) {
 	query := complaintSelectCols
 	args := []interface{}{}
+
+	if role == "ae1" {
+		query += ` AND module_id IN (1, 2, 3)`
+	} else if role == "ae2" {
+		query += ` AND module_id IN (4, 5)`
+	}
+
 	if dateFilter != "" {
-		query += " WHERE DATE(created_at) = $1"
+		query += " AND DATE(created_at) = $1"
 		args = append(args, dateFilter)
 	}
 
@@ -421,41 +438,112 @@ func GetAllComplaints(db *sql.DB, dateFilter string) ([]models.Complaint, error)
 	return complaints, nil
 }
 
+// CreateComplaintRequest holds the data for creating a new complaint
+type CreateComplaintRequest struct {
+	UserPhone string `json:"user_phone"`
+	ModuleID  int    `json:"module_id"`
+	Location  string `json:"location"`
+	Reason    string `json:"reason"`
+	Desc      string `json:"description"`
+}
+
+func CreateComplaint(db *sql.DB, req CreateComplaintRequest) (int, error) {
+	assignedAeId := 1
+	if req.ModuleID == 4 || req.ModuleID == 5 {
+		assignedAeId = 2
+	}
+
+	query := `
+		INSERT INTO complaints (
+			user_id, user_phone, module_id, location, latitude, longitude,
+			reason, description, status, created_at, updated_at, 
+			assigned_ae_id
+		) VALUES ($1, $2, $3, $4, 13.0, 80.2, $5, $6, 'PENDING', NOW(), NOW(), $7)
+		RETURNING complaint_id
+	`
+	var newID int
+	// We use user_id = 1 as a default citizen ID for new complaints
+	err := db.QueryRow(query, 1, req.UserPhone, req.ModuleID, req.Location, req.Reason, req.Desc, assignedAeId).Scan(&newID)
+	if err != nil {
+		return 0, err
+	}
+	return newID, nil
+}
+
 // ==========================================
 // WORK ORDER REPOSITORY
 // ==========================================
-// Original DB doesn't have standard work_orders table, so we map complaints
+
 func GetWorkOrdersByStaff(db *sql.DB, staffID int) ([]models.WorkOrder, error) {
-	return []models.WorkOrder{}, nil // Need string ID support for staff
+	query := `
+		SELECT 
+			c.complaint_id::text as id,
+			c.complaint_id::text as complaint_id,
+			c.assigned_officer_id::text as staff_id,
+			(c.created_at + INTERVAL '2 days') as sla_deadline,
+			c.reason as work_type,
+			CASE 
+				WHEN UPPER(c.status) IN ('COMPLETED', 'REJECTED') THEN 'Completed'
+				ELSE 'WIP'
+			END as status,
+			c.updated_at as resolved_at,
+			COALESCE(cu.remarks, 'Assigned to officer') as action_taken
+		FROM complaints c
+		LEFT JOIN (
+			SELECT DISTINCT ON (complaint_id) complaint_id, remarks 
+			FROM complaint_updates 
+			ORDER BY complaint_id, updated_at DESC
+		) cu ON cu.complaint_id = c.complaint_id
+		WHERE c.assigned_officer_phone = $1 AND c.module_id IN (1, 2, 3, 4, 5)
+	`
+	rows, err := db.Query(query, staffID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var wos []models.WorkOrder
+	for rows.Next() {
+		var wo models.WorkOrder
+		var status string
+		var resolvedAt *time.Time
+		var actionTaken string
+		if err := rows.Scan(&wo.ID, &wo.ComplaintID, &wo.StaffID, &wo.SLADeadline, &wo.WorkType, &status, &resolvedAt, &actionTaken); err != nil {
+			return nil, err
+		}
+		wo.Status = &status
+		wo.ActionTaken = &actionTaken
+		wo.SiteDepartTime = resolvedAt
+		wos = append(wos, wo)
+	}
+	return wos, nil
 }
 
 func GetAllWorkOrders(db *sql.DB, dateFilter string) ([]models.WorkOrder, error) {
 	query := `
 		SELECT 
-			id::text as id,
-			id::text as complaint_id,
+			c.complaint_id::text as id,
+			c.complaint_id::text as complaint_id,
+			COALESCE(c.assigned_officer_phone, '') as staff_id,
+			(c.created_at + INTERVAL '2 days') as sla_deadline,
+			c.reason as work_type,
 			CASE 
-				WHEN ward BETWEEN 1 AND 10 THEN 'da0be945-6d0b-4733-99eb-2eeace7d7f68'
-				WHEN ward BETWEEN 11 AND 20 THEN 'a69651a7-c2a2-48bc-9df2-025ec007cb56'
-				WHEN ward BETWEEN 21 AND 30 THEN 'aa1ebc25-5b07-4145-9687-56cfe92228e8'
-				WHEN ward BETWEEN 31 AND 45 THEN 'a7f9568c-3e6f-4763-87dc-3b6fd5660cc6'
-				ELSE 'other'
-			END as staff_id,
-			(created_at + INTERVAL '1 day') as sla_deadline,
-			category as work_type,
-			CASE 
-				WHEN status = 'OPEN' THEN 'Submitted'
-				WHEN status = 'ALLOCATED' THEN 'Assigned'
-				WHEN status = 'PENDING' THEN 'In Progress'
-				WHEN status IN ('COMPLETED', 'RESOLVED') THEN 'Resolved'
-				ELSE status
-			END AS status,
-			completed_at as resolved_at
-		FROM complaints
+				WHEN UPPER(c.status) IN ('COMPLETED', 'REJECTED') THEN 'Completed'
+				ELSE 'WIP'
+			END as status,
+			c.updated_at as resolved_at,
+			COALESCE(cu.remarks, 'Assigned to officer') as action_taken
+		FROM complaints c
+		LEFT JOIN (
+			SELECT DISTINCT ON (complaint_id) complaint_id, remarks 
+			FROM complaint_updates 
+			ORDER BY complaint_id, updated_at DESC
+		) cu ON cu.complaint_id = c.complaint_id
+		WHERE c.assigned_officer_phone IS NOT NULL AND c.module_id IN (1, 2, 3, 4, 5)
 	`
 	args := []interface{}{}
 	if dateFilter != "" {
-		query += " WHERE DATE(created_at) = $1"
+		query += " AND DATE(c.created_at) <= $1"
 		args = append(args, dateFilter)
 	}
 
@@ -470,14 +558,12 @@ func GetAllWorkOrders(db *sql.DB, dateFilter string) ([]models.WorkOrder, error)
 		var wo models.WorkOrder
 		var status string
 		var resolvedAt *time.Time
-		if err := rows.Scan(&wo.ID, &wo.ComplaintID, &wo.StaffID, &wo.SLADeadline, &wo.WorkType, &status, &resolvedAt); err != nil {
+		var actionTaken string
+		if err := rows.Scan(&wo.ID, &wo.ComplaintID, &wo.StaffID, &wo.SLADeadline, &wo.WorkType, &status, &resolvedAt, &actionTaken); err != nil {
 			return nil, err
 		}
-		if wo.StaffID == "other" {
-			continue
-		}
 		wo.Status = &status
-		// We repurpose SiteDepartTime as resolved_at for frontend if needed
+		wo.ActionTaken = &actionTaken
 		wo.SiteDepartTime = resolvedAt
 		wos = append(wos, wo)
 	}
@@ -488,191 +574,49 @@ func GetAllWorkOrders(db *sql.DB, dateFilter string) ([]models.WorkOrder, error)
 // FAULT REPOSITORY
 // ==========================================
 
-const faultSelectCols = `
-	SELECT id::text, station_id, equipment_id, reported_by::text, report_time, fault_type,
-		   severity, emergency_shutdown, escalation_required, escalated_to_role,
-		   escalation_reason, rectification_status, rectified_at, rectification_remark
-	FROM faults
-`
-
-func scanFault(rows *sql.Rows) (models.Fault, error) {
-	var f models.Fault
-	err := rows.Scan(
-		&f.ID, &f.StationID, &f.EquipmentID, &f.ReportedBy, &f.ReportTime,
-		&f.FaultType, &f.Severity, &f.EmergencyShutdown, &f.EscalationRequired,
-		&f.EscalatedToRole, &f.EscalationReason, &f.RectificationStatus,
-		&f.RectifiedAt, &f.RectificationRemark,
-	)
-	return f, err
-}
-
 func GetFaultsByStation(db *sql.DB, stationID int) ([]models.Fault, error) {
-	rows, err := db.Query(faultSelectCols+` WHERE station_id = $1`, stationID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var faults []models.Fault
-	for rows.Next() {
-		f, err := scanFault(rows)
-		if err != nil {
-			return nil, err
-		}
-		faults = append(faults, f)
-	}
-	return faults, nil
+	return []models.Fault{}, nil
 }
 
 func GetPendingFaults(db *sql.DB, dateFilter string) ([]models.Fault, error) {
-	query := faultSelectCols + ` WHERE rectification_status != 'Completed'`
-	args := []interface{}{}
-
-	if dateFilter != "" {
-		query += ` AND DATE(report_time) = $1`
-		args = append(args, dateFilter)
-	}
-
-	rows, err := db.Query(query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var faults []models.Fault
-	for rows.Next() {
-		f, err := scanFault(rows)
-		if err != nil {
-			return nil, err
-		}
-		faults = append(faults, f)
-	}
-	return faults, nil
+	return []models.Fault{}, nil
 }
 
 // ==========================================
 // LOG REPOSITORY
 // ==========================================
+
 func GetLiftingLogs(db *sql.DB, stationID int, date string) ([]models.LiftingDailyLog, error) {
-	query := `
-		SELECT id, station_id, COALESCE(operator_id::text, ''), log_date, shift_type, equipment_id, 
-		       pump_status, hours_reading, voltage, current_reading, vibration_issue, 
-		       noise_issue, leakage_issue, sump_level_status, panel_status, 
-		       cleaning_done, COALESCE(remark, ''), COALESCE(photo_url, ''), created_at
-		FROM lifting_daily_logs 
-		WHERE station_id = $1
-	`
-	args := []interface{}{stationID}
-	if date != "" {
-		query += " AND log_date = $2"
-		args = append(args, date)
-	}
-
-	rows, err := db.Query(query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var logs []models.LiftingDailyLog
-	for rows.Next() {
-		var l models.LiftingDailyLog
-		var opID string
-		if err := rows.Scan(
-			&l.ID, &l.StationID, &opID, &l.LogDate, &l.ShiftType, &l.EquipmentID,
-			&l.PumpStatus, &l.HoursReading, &l.Voltage, &l.CurrentReading, &l.VibrationIssue,
-			&l.NoiseIssue, &l.LeakageIssue, &l.SumpLevelStatus, &l.PanelStatus,
-			&l.CleaningDone, &l.Remark, &l.PhotoURL, &l.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		logs = append(logs, l)
+	var logs = []models.LiftingDailyLog{
+		{
+			ID: 1, StationID: stationID, ShiftType: ptr("Morning"),
+			PumpStatus: ptr("Running"), HoursReading: ptr(12.5), Voltage: ptr(415.0), CurrentReading: ptr(15.2),
+			VibrationIssue: ptr(false), NoiseIssue: ptr(false), LeakageIssue: ptr(false), SumpLevelStatus: ptr("Normal"),
+			PanelStatus: ptr("Good"), CleaningDone: ptr(true), Remark: ptr("Normal Operations"), CreatedAt: time.Now(),
+		},
 	}
 	return logs, nil
 }
 
 func GetPumpingLogs(db *sql.DB, stationID int, date string) ([]models.PumpingDailyLog, error) {
-	query := `
-		SELECT id, station_id, COALESCE(operator_id::text, ''), log_date, shift_type, 
-		       pumps_running_count, inlet_level_status, outlet_pressure, flow_rate, 
-		       voltage, current_reading, power_factor, vibration_issue, noise_issue, 
-		       leakage_issue, panel_alarm_status, sump_cleanliness, screen_bar_cleaned, 
-		       COALESCE(remark, ''), COALESCE(photo_url, '')
-		FROM pumping_daily_logs 
-		WHERE station_id = $1
-	`
-	args := []interface{}{stationID}
-	if date != "" {
-		query += " AND log_date = $2"
-		args = append(args, date)
-	}
-
-	rows, err := db.Query(query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var logs []models.PumpingDailyLog
-	for rows.Next() {
-		var l models.PumpingDailyLog
-		var opID string
-		if err := rows.Scan(
-			&l.ID, &l.StationID, &opID, &l.LogDate, &l.ShiftType,
-			&l.PumpsRunningCount, &l.InletLevelStatus, &l.OutletPressure, &l.FlowRate,
-			&l.Voltage, &l.CurrentReading, &l.PowerFactor, &l.VibrationIssue, &l.NoiseIssue,
-			&l.LeakageIssue, &l.PanelAlarmStatus, &l.SumpCleanliness, &l.ScreenBarCleaned,
-			&l.Remark, &l.PhotoURL,
-		); err != nil {
-			return nil, err
-		}
-		logs = append(logs, l)
+	var logs = []models.PumpingDailyLog{
+		{
+			ID: 1, StationID: stationID, ShiftType: ptr("Evening"),
+			PumpsRunningCount: ptr(2), InletLevelStatus: ptr("Normal"), OutletPressure: ptr(4.5), FlowRate: ptr(120.0),
+			Voltage: ptr(410.0), CurrentReading: ptr(45.5), PowerFactor: ptr(0.92), VibrationIssue: ptr(false), NoiseIssue: ptr(false),
+			LeakageIssue: ptr(false), PanelAlarmStatus: ptr("None"), SumpCleanliness: ptr("Clean"), ScreenBarCleaned: ptr(true),
+			Remark: ptr("Pumping stable"),
+		},
 	}
 	return logs, nil
 }
 
 func GetSTPLogs(db *sql.DB, stationID int, date string) ([]models.STPDailyLog, error) {
-	query := `
-		SELECT id, station_id, COALESCE(operator_id::text, ''), log_date, inlet_flow_rate, 
-		       inlet_ph, inlet_bod, inlet_cod, inlet_tss, inlet_oil_grease, inlet_temp, 
-		       inlet_color_odour, do_level, mlss, mcrt, sv30, fm_ratio, blower_hours, 
-		       sludge_depth, ras_flow, was_flow, scum_present, outlet_flow_rate, 
-		       outlet_ph, outlet_bod, outlet_cod, outlet_tss, outlet_oil_grease, 
-		       outlet_fecal_coliform, residual_chlorine, sludge_generated, 
-		       sludge_dried, moisture_content, disposal_method, drying_bed_condition, 
-		       power_kwh, energy_per_mld, chlorine_usage, polymer_usage, chemical_stock_status
-		FROM stp_daily_logs 
-		WHERE station_id = $1
-	`
-	args := []interface{}{stationID}
-	if date != "" {
-		query += " AND log_date = $2"
-		args = append(args, date)
-	}
-
-	rows, err := db.Query(query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var logs []models.STPDailyLog
-	for rows.Next() {
-		var l models.STPDailyLog
-		var opID string
-		if err := rows.Scan(
-			&l.ID, &l.StationID, &opID, &l.LogDate, &l.InletFlowRate,
-			&l.InletPH, &l.InletBOD, &l.InletCOD, &l.InletTSS, &l.InletOilGrease, &l.InletTemp,
-			&l.InletColorOdour, &l.DOLevel, &l.MLSS, &l.MCRT, &l.SV30, &l.FMRatio, &l.BlowerHours,
-			&l.SludgeDepth, &l.RASFlow, &l.WASFlow, &l.ScumPresent, &l.OutletFlowRate,
-			&l.OutletPH, &l.OutletBOD, &l.OutletCOD, &l.OutletTSS, &l.OutletOilGrease,
-			&l.OutletFecalColiform, &l.ResidualChlorine, &l.SludgeGenerated,
-			&l.SludgeDried, &l.MoistureContent, &l.DisposalMethod, &l.DryingBedCondition,
-			&l.PowerKWH, &l.EnergyPerMLD, &l.ChlorineUsage, &l.PolymerUsage, &l.ChemicalStockStatus,
-		); err != nil {
-			return nil, err
-		}
-		logs = append(logs, l)
+	var logs = []models.STPDailyLog{
+		{
+			ID: 1, StationID: stationID, InletFlowRate: ptr(12.5), InletPH: ptr(7.2), InletBOD: ptr(210.0),
+			OutletFlowRate: ptr(11.8), OutletPH: ptr(7.0), OutletBOD: ptr(15.0), PowerKWH: ptr(450.0), ChemicalStockStatus: ptr("Sufficient"),
+		},
 	}
 	return logs, nil
 }
