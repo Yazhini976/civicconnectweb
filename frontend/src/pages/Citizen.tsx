@@ -543,56 +543,7 @@ export default function Citizen() {
         <KPICard title="In Progress Today" value={officerFilteredComplaints.filter(c => c.status === 'In Progress').length} variant="info" icon={<Zap />} onClick={() => openListModal('In Progress Today', 'today', 'In Progress')} />
       </div>
 
-      <div className="mb-6 grid gap-6 lg:grid-cols-2">
-        {/* Bar Chart – Complaints by Ward */}
-        <div className="chart-container">
-          <div className="mb-4 flex items-center justify-between">
-            <h3 className="font-semibold">Complaints by Ward</h3>
-            <div className="w-[200px]">
-              <Select value={selectedOfficer} onValueChange={setSelectedOfficer}>
-                <SelectTrigger className="h-8">
-                  <SelectValue placeholder="All Officers" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Officers</SelectItem>
-                  {officers.length > 0 ? (
-                    <SelectGroup>
-                      {officers.map(o => (
-                        <SelectItem key={o.id || o.name} value={o.id || 'unknown'}>{o.name}</SelectItem>
-                      ))}
-                    </SelectGroup>
-                  ) : (
-                    <SelectGroup>
-                      <SelectItem value="fieldofficer1">Officer 1 (1-10)</SelectItem>
-                      <SelectItem value="fieldofficer2">Officer 2 (11-20)</SelectItem>
-                      <SelectItem value="fieldofficer3">Officer 3 (21-30)</SelectItem>
-                      <SelectItem value="fieldofficer4">Officer 4 (31-42)</SelectItem>
-                    </SelectGroup>
-                  )}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <ResponsiveContainer width="100%" height={400}>
-            <BarChart data={complaintsByWard}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis 
-                dataKey="ward" 
-                interval={0} 
-                angle={-45} 
-                textAnchor="end" 
-                height={70}
-                tick={{ fontSize: 10, fontWeight: 500 }} 
-              />
-              <YAxis tick={{ fontSize: 12 }} />
-              <Tooltip
-                contentStyle={{ fontSize: '14px' }}
-              />
-              <Bar dataKey="count" fill="hsl(var(--primary))" />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-
+      <div className="mb-6">
         {/* Pie Chart – Complaint Types */}
         <div className="chart-container">
           <h3 className="mb-4 font-semibold">Complaints by Type</h3>

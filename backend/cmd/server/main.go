@@ -1,4 +1,4 @@
-﻿package main
+package main
 
 import (
 	"database/sql"
@@ -123,7 +123,9 @@ func main() {
 		AllowedOrigins: []string{
 			"http://localhost:5173",
 			"http://localhost:3000",
+			"http://localhost:8080",
 			"http://127.0.0.1:5173",
+			"http://127.0.0.1:8080",
 			os.Getenv("FRONTEND_URL"), // Added for deployment
 		},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
@@ -133,48 +135,48 @@ func main() {
 		MaxAge:           300,
 	}))
 
-	// â”€â”€ PUBLIC ROUTES â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-	r.With(loginRateLimit).Post("/api/login", handlers.LoginHandler(db))
+	// ── PUBLIC ROUTES ─────────────────────────────────────────────────────
+	r.With(loginRateLimit).Post("/api/bG9naW4", handlers.LoginHandler(db))
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"status":"ok","service":"civic-app-backend"}`))
 	})
 
-	// â”€â”€ PROTECTED ROUTES (require valid JWT) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+	// ── PROTECTED ROUTES (require valid JWT) ──────────────────────────────
 	r.Group(func(r chi.Router) {
 		r.Use(appMiddleware.AuthMiddleware)
 
-		r.Post("/api/assign-officer", handlers.AssignOfficerHandler(db))
-		r.Get("/api/officers", handlers.GetOfficersHandler(db))
-		r.Get("/api/users/mobile", handlers.GetUserByMobileHandler(db))
-		r.Get("/api/users/role", handlers.GetUsersByRoleHandler(db))
+		r.Post("/api/YXNzaWduLW9mZmljZXI", handlers.AssignOfficerHandler(db))
+		r.Get("/api/b2ZmaWNlcnM", handlers.GetOfficersHandler(db))
+		r.Get("/api/dXNlcnMvbW9iaWxl", handlers.GetUserByMobileHandler(db))
+		r.Get("/api/dXNlcnMvcm9sZQ", handlers.GetUsersByRoleHandler(db))
 
-		r.Get("/api/stations", handlers.GetAllStationsHandler(db))
-		r.Get("/api/stations/type", handlers.GetStationsByTypeHandler(db))
-		r.Get("/api/equipment", handlers.GetEquipmentByStationHandler(db))
+		r.Get("/api/c3RhdGlvbnM", handlers.GetAllStationsHandler(db))
+		r.Get("/api/c3RhdGlvbnMvdHlwZQ", handlers.GetStationsByTypeHandler(db))
+		r.Get("/api/ZXF1aXBtZW50", handlers.GetEquipmentByStationHandler(db))
 
-		r.Get("/api/complaints", handlers.GetAllComplaintsHandler(db))
-		r.Post("/api/complaints", handlers.CreateComplaintHandler(db))
-		r.Get("/api/complaints/ward", handlers.GetComplaintsByWardHandler(db))
-		r.Get("/api/complaints/status", handlers.GetComplaintsByStatusHandler(db))
-		r.Get("/api/complaints/stats", handlers.GetStatusCountsHandler(db))
-		r.Get("/api/complaints/type-stats", handlers.GetComplaintTypeStatsHandler(db))
+		r.Get("/api/Y29tcGxhaW50cw", handlers.GetAllComplaintsHandler(db))
+		r.Post("/api/Y29tcGxhaW50cw", handlers.CreateComplaintHandler(db))
+		r.Get("/api/Y29tcGxhaW50cy93YXJk", handlers.GetComplaintsByWardHandler(db))
+		r.Get("/api/Y29tcGxhaW50cy9zdGF0dXM", handlers.GetComplaintsByStatusHandler(db))
+		r.Get("/api/Y29tcGxhaW50cy9zdGF0cw", handlers.GetStatusCountsHandler(db))
+		r.Get("/api/Y29tcGxhaW50cy90eXBlLXN0YXRz", handlers.GetComplaintTypeStatsHandler(db))
 
-		r.Get("/api/work-orders", handlers.GetAllWorkOrdersHandler(db))
-		r.Get("/api/work-orders/staff", handlers.GetWorkOrdersByStaffHandler(db))
+		r.Get("/api/d29yay1vcmRlcnM", handlers.GetAllWorkOrdersHandler(db))
+		r.Get("/api/d29yay1vcmRlcnMvc3RhZmY", handlers.GetWorkOrdersByStaffHandler(db))
 
-		r.Get("/api/faults/station", handlers.GetFaultsByStationHandler(db))
-		r.Get("/api/faults/pending", handlers.GetPendingFaultsHandler(db))
+		r.Get("/api/ZmF1bHRzL3N0YXRpb24", handlers.GetFaultsByStationHandler(db))
+		r.Get("/api/ZmF1bHRzL3BlbmRpbmc", handlers.GetPendingFaultsHandler(db))
 
-		r.Get("/api/logs/lifting", handlers.GetLiftingLogsHandler(db))
-		r.Get("/api/logs/pumping", handlers.GetPumpingLogsHandler(db))
-		r.Get("/api/logs/stp", handlers.GetSTPLogsHandler(db))
+		r.Get("/api/bG9ncy9saWZ0aW5n", handlers.GetLiftingLogsHandler(db))
+		r.Get("/api/bG9ncy9wdW1waW5n", handlers.GetPumpingLogsHandler(db))
+		r.Get("/api/bG9ncy9zdHA", handlers.GetSTPLogsHandler(db))
 
-		r.Get("/api/dashboard/station-counts", handlers.GetStationCountsHandler(db))
-		r.Get("/api/dashboard/officer-stats", handlers.GetOfficerStatsHandler(db))
+		r.Get("/api/ZGFzaGJvYXJkL3N0YXRpb24tY291bnRz", handlers.GetStationCountsHandler(db))
+		r.Get("/api/ZGFzaGJvYXJkL29mZmljZXItc3RhdHM", handlers.GetOfficerStatsHandler(db))
 
-		r.Get("/api/energy/trend", handlers.GetEnergyTrendHandler(db))
-		r.Get("/api/sla/trend", handlers.GetSLATrendHandler(db))
+		r.Get("/api/ZW5lcmd5L3RyZW5k", handlers.GetEnergyTrendHandler(db))
+		r.Get("/api/c2xhL3RyZW5k", handlers.GetSLATrendHandler(db))
 
 		r.Route("/api/garbage", func(r chi.Router) {
 			r.Get("/trucks",              gHandler.ListTrucks)
