@@ -1,4 +1,4 @@
-package repository
+﻿package repository
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"ugss-command-center-backend/internal/garbage/models"
+	"civicconnectweb/backend/internal/garbage/models"
 )
 
 // ================================================================
@@ -383,7 +383,7 @@ func (r *GarbageRepository) GetFleetStats(ctx context.Context) (*models.FleetSta
 }
 
 // ----------------------------------------------------------------
-// HELPERS — scanner functions
+// HELPERS â€” scanner functions
 // ----------------------------------------------------------------
 
 func scanTrucks(rows *sql.Rows) ([]models.GarbageTruck, error) {
@@ -444,3 +444,5 @@ var pq = pqArrayWrapper{}
 func (pqArrayWrapper) Array(a *[]string) pqArray {
 	return pqArray{a: a}
 }
+
+

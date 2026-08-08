@@ -1,4 +1,4 @@
-package handlers
+﻿package handlers
 
 import (
 	"context"
@@ -7,18 +7,18 @@ import (
 	"math"
 	"time"
 
-	"ugss-command-center-backend/internal/garbage/models"
-	"ugss-command-center-backend/internal/garbage/service"
+	"civicconnectweb/backend/internal/garbage/models"
+	"civicconnectweb/backend/internal/garbage/service"
 )
 
 // ================================================================
-// GPS SIMULATOR — Test scenarios for route deviation detection
+// GPS SIMULATOR â€” Test scenarios for route deviation detection
 // ================================================================
 //
-// Scenario 1: Normal — truck follows assigned route perfectly
-// Scenario 2: Brief detour (<2 min) — returns, log only
-// Scenario 3: Extended deviation (>2 min) — Medium alert
-// Scenario 4: Critical deviation (>5 min />300m) — High alert
+// Scenario 1: Normal â€” truck follows assigned route perfectly
+// Scenario 2: Brief detour (<2 min) â€” returns, log only
+// Scenario 3: Extended deviation (>2 min) â€” Medium alert
+// Scenario 4: Critical deviation (>5 min />300m) â€” High alert
 // ================================================================
 
 // Base coordinates for PC-1 route (Ward 4)
@@ -46,9 +46,9 @@ func RunSimulatorScenario(svc *service.DeviationService, truckID, scenario int) 
 	}
 }
 
-// ── Scenario 1: Normal route following ───────────────────────────
+// â”€â”€ Scenario 1: Normal route following â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 func simulateNormal(ctx context.Context, svc *service.DeviationService, truckID int) {
-	log.Println("[SIM] Scenario 1: Normal route — no alerts expected")
+	log.Println("[SIM] Scenario 1: Normal route â€” no alerts expected")
 	// Simulate 20 GPS pings along the route (no deviation)
 	for i := 0; i < 20; i++ {
 		lat := baseLat + float64(i)*0.0002
@@ -56,18 +56,18 @@ func simulateNormal(ctx context.Context, svc *service.DeviationService, truckID 
 		sendGPS(ctx, svc, truckID, lat, lng, 12.0)
 		time.Sleep(5 * time.Second)
 	}
-	log.Println("[SIM] Scenario 1 complete — truck followed route normally")
+	log.Println("[SIM] Scenario 1 complete â€” truck followed route normally")
 }
 
-// ── Scenario 2: Brief detour (<2min) — returns to route ──────────
+// â”€â”€ Scenario 2: Brief detour (<2min) â€” returns to route â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 func simulateBriefDetour(ctx context.Context, svc *service.DeviationService, truckID int) {
-	log.Println("[SIM] Scenario 2: Brief detour — log only, no notification")
+	log.Println("[SIM] Scenario 2: Brief detour â€” log only, no notification")
 	// On route for 5 pings
 	for i := 0; i < 5; i++ {
 		sendGPS(ctx, svc, truckID, baseLat+float64(i)*0.0002, baseLng, 12.0)
 		time.Sleep(5 * time.Second)
 	}
-	// Detour: 60m off-route for ~60 seconds (5 pings × 5s = 25s, stays < 2min)
+	// Detour: 60m off-route for ~60 seconds (5 pings Ã— 5s = 25s, stays < 2min)
 	log.Println("[SIM] Brief detour started (50m off-route)")
 	for i := 0; i < 5; i++ {
 		// ~50 meters east of route
@@ -80,18 +80,18 @@ func simulateBriefDetour(ctx context.Context, svc *service.DeviationService, tru
 		sendGPS(ctx, svc, truckID, baseLat+0.001+float64(i)*0.0002, baseLng, 12.0)
 		time.Sleep(5 * time.Second)
 	}
-	log.Println("[SIM] Scenario 2 complete — brief detour logged, no alert sent")
+	log.Println("[SIM] Scenario 2 complete â€” brief detour logged, no alert sent")
 }
 
-// ── Scenario 3: Extended deviation (3min) → Medium alert ─────────
+// â”€â”€ Scenario 3: Extended deviation (3min) â†’ Medium alert â”€â”€â”€â”€â”€â”€â”€â”€â”€
 func simulateExtendedDeviation(ctx context.Context, svc *service.DeviationService, truckID int) {
-	log.Println("[SIM] Scenario 3: Extended deviation — Medium alert expected")
+	log.Println("[SIM] Scenario 3: Extended deviation â€” Medium alert expected")
 	// On route for 5 pings
 	for i := 0; i < 5; i++ {
 		sendGPS(ctx, svc, truckID, baseLat+float64(i)*0.0002, baseLng, 12.0)
 		time.Sleep(5 * time.Second)
 	}
-	// Off route for 35 pings × 5s = 175s (~3 min) → Medium alert
+	// Off route for 35 pings Ã— 5s = 175s (~3 min) â†’ Medium alert
 	log.Println("[SIM] Extended deviation started (150m off-route)")
 	for i := 0; i < 35; i++ {
 		// ~150m north-east of route
@@ -100,18 +100,18 @@ func simulateExtendedDeviation(ctx context.Context, svc *service.DeviationServic
 		sendGPS(ctx, svc, truckID, offLat, offLng, 15.0)
 		time.Sleep(5 * time.Second)
 	}
-	log.Println("[SIM] Scenario 3 complete — medium deviation alert triggered")
+	log.Println("[SIM] Scenario 3 complete â€” medium deviation alert triggered")
 }
 
-// ── Scenario 4: Critical — >5min AND >300m ────────────────────────
+// â”€â”€ Scenario 4: Critical â€” >5min AND >300m â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 func simulateCriticalDeviation(ctx context.Context, svc *service.DeviationService, truckID int) {
-	log.Println("[SIM] Scenario 4: Critical deviation — High alert expected")
+	log.Println("[SIM] Scenario 4: Critical deviation â€” High alert expected")
 	// On route briefly
 	for i := 0; i < 3; i++ {
 		sendGPS(ctx, svc, truckID, baseLat, baseLng+float64(i)*0.0002, 10.0)
 		time.Sleep(5 * time.Second)
 	}
-	// Critical off-route: 400m away for 7+ minutes (85 pings × 5s = 425s)
+	// Critical off-route: 400m away for 7+ minutes (85 pings Ã— 5s = 425s)
 	log.Println("[SIM] CRITICAL deviation started (400m off-route)")
 	for i := 0; i < 85; i++ {
 		// Simulate truck driving ~400m away and continuing
@@ -120,10 +120,10 @@ func simulateCriticalDeviation(ctx context.Context, svc *service.DeviationServic
 		sendGPS(ctx, svc, truckID, offLat, offLng, 25.0)
 		time.Sleep(5 * time.Second)
 	}
-	log.Println("[SIM] Scenario 4 complete — critical alert triggered")
+	log.Println("[SIM] Scenario 4 complete â€” critical alert triggered")
 }
 
-// ── GPS sender helper ─────────────────────────────────────────────
+// â”€â”€ GPS sender helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 func sendGPS(ctx context.Context, svc *service.DeviationService, truckID int, lat, lng, speed float64) {
 	update := models.GPSUpdate{
 		TruckID:   truckID,
@@ -136,7 +136,7 @@ func sendGPS(ctx context.Context, svc *service.DeviationService, truckID int, la
 	if err := svc.ProcessGPSUpdate(ctx, update); err != nil {
 		log.Printf("[SIM] GPS update error: %v", err)
 	}
-	log.Printf("[SIM] GPS → truck=%d lat=%.6f lng=%.6f spd=%.1f",
+	log.Printf("[SIM] GPS â†’ truck=%d lat=%.6f lng=%.6f spd=%.1f",
 		truckID, lat, lng, speed)
 }
 
@@ -159,3 +159,5 @@ func FormatScenarioName(scenario int) string {
 	}
 	return fmt.Sprintf("Scenario %d", scenario)
 }
+
+

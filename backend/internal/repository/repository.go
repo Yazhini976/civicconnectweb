@@ -1,11 +1,11 @@
-package repository
+﻿package repository
 
 import (
 	"database/sql"
 	"fmt"
 	"strings"
 	"time"
-	"ugss-command-center-backend/internal/models"
+	"civicconnectweb/backend/internal/models"
 )
 
 // Helper function to return pointer to a value
@@ -620,3 +620,5 @@ func GetSTPLogs(db *sql.DB, stationID int, date string) ([]models.STPDailyLog, e
 	}
 	return logs, nil
 }
+
+

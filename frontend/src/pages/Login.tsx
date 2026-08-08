@@ -1,4 +1,4 @@
-import { useState, KeyboardEvent } from "react";
+﻿import { useState, KeyboardEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { Building2, ShieldCheck, User, Lock, Eye, EyeOff } from "lucide-react";
 import { API_BASE_URL } from "../services/api";
@@ -21,7 +21,7 @@ const Login = () => {
     setError("");
 
     try {
-      const res = await fetch(`${API_BASE_URL}/login`, {
+      const res = await fetch(`${API_BASE_URL}/bG9naW4`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password })
@@ -34,6 +34,10 @@ const Login = () => {
           role: data.role, 
           modules: data.modules 
         }));
+        // Save JWT token for API authentication
+        if (data.token) {
+          localStorage.setItem("auth_token", data.token);
+        }
         window.location.href = "/";
       } else {
         setLoading(false);
@@ -68,7 +72,7 @@ const Login = () => {
 
           <div className="w-full mt-4 flex items-center justify-center">
             <p className="text-cyan-400/80 text-sm font-semibold tracking-[0.2em] uppercase">
-              One App • One City • Better Together
+              One App â€¢ One City â€¢ Better Together
             </p>
           </div>
         </div>
@@ -176,3 +180,4 @@ const Login = () => {
 };
 
 export default Login;
+

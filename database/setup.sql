@@ -3,7 +3,7 @@
 
 -- Connect to the database and run the rest
 \c civic_db;
-旋旋旋旋   
+
 -- Drop existing tables if they exist (for clean setup)
 DROP TABLE IF EXISTS escalations CASCADE;
 DROP TABLE IF EXISTS complaint_feedback CASCADE;

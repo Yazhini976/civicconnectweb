@@ -1,4 +1,4 @@
-package service
+﻿package service
 
 import (
 	"context"
@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"ugss-command-center-backend/internal/garbage/models"
-	"ugss-command-center-backend/internal/garbage/repository"
-	ws "ugss-command-center-backend/internal/garbage/websocket"
+	"civicconnectweb/backend/internal/garbage/models"
+	"civicconnectweb/backend/internal/garbage/repository"
+	ws "civicconnectweb/backend/internal/garbage/websocket"
 )
 
 // ================================================================
@@ -43,7 +43,7 @@ func (s *DeviationService) ProcessGPSUpdate(ctx context.Context, update models.G
 	// 2. Spatial check: is truck on its official GIS route?
 	result, err := s.repo.CheckPointOnRoute(ctx, update.TruckID, update.Latitude, update.Longitude)
 	if err != nil {
-		// No route assigned for this truck — update location only
+		// No route assigned for this truck â€” update location only
 		log.Printf("[GPS] Truck %s has no route assigned, skipping deviation check", truck.VehicleName)
 		return s.updateTruckOnly(ctx, truck, update)
 	}
@@ -97,7 +97,7 @@ func (s *DeviationService) ProcessGPSUpdate(ctx context.Context, update models.G
 // ----------------------------------------------------------------
 
 func (s *DeviationService) handleOnRoute(ctx context.Context, truck *models.GarbageTruck, update models.GPSUpdate) string {
-	// Check if there was an active deviation — resolve it
+	// Check if there was an active deviation â€” resolve it
 	if state, ok := s.timers.Load(truck.ID); ok {
 		ds := state.(*models.DeviationState)
 		duration := int(time.Since(ds.StartedAt).Seconds())
@@ -110,8 +110,8 @@ func (s *DeviationService) handleOnRoute(ctx context.Context, truck *models.Garb
 			log.Printf("[DEV] Truck %s returned to route after %ds. Deviation %d resolved.",
 				truck.VehicleName, duration, *ds.DeviationID)
 		} else {
-			// Brief detour — save low-severity log only
-			log.Printf("[DEV] Truck %s brief detour %.1fm for %ds — log only.",
+			// Brief detour â€” save low-severity log only
+			log.Printf("[DEV] Truck %s brief detour %.1fm for %ds â€” log only.",
 				truck.VehicleName, ds.MaxDistance, duration)
 			s.repo.SaveDeviationLog(ctx, &models.DeviationLog{
 				TruckID:         truck.ID,
@@ -147,7 +147,7 @@ func (s *DeviationService) handleOffRoute(
 	if val, ok := s.timers.Load(truck.ID); ok {
 		ds = val.(*models.DeviationState)
 	} else {
-		// First time off route — start timer
+		// First time off route â€” start timer
 		ds = &models.DeviationState{
 			TruckID:        truck.ID,
 			StartedAt:      now,
@@ -181,12 +181,12 @@ func (s *DeviationService) handleOffRoute(
 	log.Printf("[DEV] Truck %s off-route: %ds elapsed, %.1fm from route, severity=%s",
 		truck.VehicleName, durationSec, ds.MaxDistance, severity)
 
-	// ── Grace period: < 2 min AND < 100m → no DB record yet ──
+	// â”€â”€ Grace period: < 2 min AND < 100m â†’ no DB record yet â”€â”€
 	if durationSec < models.GracePeriodSeconds && ds.MaxDistance < models.LowSeverityMaxMeters {
 		return models.StatusSlightlyOffRoute
 	}
 
-	// ── Create or update the deviation record ──
+	// â”€â”€ Create or update the deviation record â”€â”€
 	if ds.DeviationID == nil {
 		// Create new deviation
 		startLat := ds.StartLatitude
@@ -220,7 +220,7 @@ func (s *DeviationService) handleOffRoute(
 			ds.LastLatitude, ds.LastLongitude, severity, models.DevStatusActive)
 	}
 
-	// ── Broadcast alert for medium/high ──
+	// â”€â”€ Broadcast alert for medium/high â”€â”€
 	if severity != models.SeverityLow && ds.DeviationID != nil {
 		driverName := ""
 		if truck.DriverName != nil {
@@ -289,3 +289,5 @@ func (s *DeviationService) ActiveTimerCount() int {
 	})
 	return count
 }
+
+

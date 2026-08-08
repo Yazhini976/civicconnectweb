@@ -1,4 +1,4 @@
-package handlers
+﻿package handlers
 
 import (
 	"encoding/json"
@@ -10,10 +10,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"ugss-command-center-backend/internal/garbage/models"
-	"ugss-command-center-backend/internal/garbage/repository"
-	"ugss-command-center-backend/internal/garbage/service"
-	ws "ugss-command-center-backend/internal/garbage/websocket"
+	"civicconnectweb/backend/internal/garbage/models"
+	"civicconnectweb/backend/internal/garbage/repository"
+	"civicconnectweb/backend/internal/garbage/service"
+	ws "civicconnectweb/backend/internal/garbage/websocket"
 )
 
 // ================================================================
@@ -30,7 +30,7 @@ func New(repo *repository.GarbageRepository, svc *service.DeviationService, hub 
 	return &GarbageHandler{repo: repo, service: svc, hub: hub}
 }
 
-// ── Helper ────────────────────────────────────────────────────────
+// â”€â”€ Helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 func respond(w http.ResponseWriter, code int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
@@ -102,7 +102,7 @@ func (h *GarbageHandler) GetTruckHistory(w http.ResponseWriter, r *http.Request)
 }
 
 // ================================================================
-// POST /api/gps  — main GPS ingest endpoint
+// POST /api/gps  â€” main GPS ingest endpoint
 // Body: { "truck_id": 1, "latitude": 10.78, "longitude": 77.83, "speed": 5.2, "heading": 90, "timestamp": "..." }
 // ================================================================
 func (h *GarbageHandler) IngestGPS(w http.ResponseWriter, r *http.Request) {
@@ -148,7 +148,7 @@ func (h *GarbageHandler) GetRoute(w http.ResponseWriter, r *http.Request) {
 }
 
 // ================================================================
-// GET /api/garbage/routes  — all routes as GeoJSON features
+// GET /api/garbage/routes  â€” all routes as GeoJSON features
 // ================================================================
 func (h *GarbageHandler) GetAllRoutes(w http.ResponseWriter, r *http.Request) {
 	routes, err := h.repo.GetAllRoutesGeoJSON(r.Context())
@@ -192,7 +192,7 @@ func (h *GarbageHandler) ListDeviations(w http.ResponseWriter, r *http.Request) 
 }
 
 // ================================================================
-// GET /api/garbage/stats  — fleet summary stats
+// GET /api/garbage/stats  â€” fleet summary stats
 // ================================================================
 func (h *GarbageHandler) GetStats(w http.ResponseWriter, r *http.Request) {
 	stats, err := h.repo.GetFleetStats(r.Context())
@@ -208,14 +208,14 @@ func (h *GarbageHandler) GetStats(w http.ResponseWriter, r *http.Request) {
 }
 
 // ================================================================
-// GET /ws/garbage  — WebSocket live feed
+// GET /ws/garbage  â€” WebSocket live feed
 // ================================================================
 func (h *GarbageHandler) ServeWS(w http.ResponseWriter, r *http.Request) {
 	h.hub.ServeWS(w, r)
 }
 
 // ================================================================
-// POST /api/garbage/simulate  — GPS simulation trigger
+// POST /api/garbage/simulate  â€” GPS simulation trigger
 // Body: { "scenario": 1, "truck_id": 1 }
 // ================================================================
 func (h *GarbageHandler) Simulate(w http.ResponseWriter, r *http.Request) {
@@ -241,3 +241,5 @@ func (h *GarbageHandler) Simulate(w http.ResponseWriter, r *http.Request) {
 		"truck_id": req.TruckID,
 	})
 }
+
+

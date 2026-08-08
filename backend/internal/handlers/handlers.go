@@ -1,4 +1,4 @@
-package handlers
+﻿package handlers
 
 import (
 	"database/sql"
@@ -6,11 +6,14 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
+	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 
-	"ugss-command-center-backend/internal/repository"
+	"civicconnectweb/backend/internal/repository"
 )
 
 // ==========================================
@@ -23,6 +26,7 @@ type LoginRequest struct {
 }
 
 type LoginResponse struct {
+	Token    string   `json:"token"`
 	Username string   `json:"username"`
 	Role     string   `json:"role"`
 	Modules  []string `json:"modules"`
@@ -58,7 +62,22 @@ func LoginHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
+		// Generate JWT token (expires in 72 hours)
+		claims := jwt.MapClaims{
+			"username": req.Username,
+			"role":     role,
+			"exp":      time.Now().Add(72 * time.Hour).Unix(),
+		}
+		token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+		signed, err := token.SignedString([]byte(os.Getenv("JWT_SECRET")))
+		if err != nil {
+			log.Printf("Error generating token: %v", err)
+			http.Error(w, "Error generating session token", http.StatusInternalServerError)
+			return
+		}
+
 		resp := LoginResponse{
+			Token:    signed,
 			Username: req.Username,
 			Role:     role,
 			Modules:  modules,
@@ -407,7 +426,7 @@ func GetPendingFaultsHandler(db *sql.DB) http.HandlerFunc {
 }
 
 // ==========================================
-// DASHBOARD HANDLER (NEW – SAFE ADDITION)
+// DASHBOARD HANDLER (NEW â€“ SAFE ADDITION)
 // ==========================================
 
 func GetStationCountsHandler(db *sql.DB) http.HandlerFunc {
@@ -597,4 +616,6 @@ func GetOfficersHandler(db *sql.DB) http.HandlerFunc {
 		json.NewEncoder(w).Encode(officers)
 	}
 }
+
+
 
