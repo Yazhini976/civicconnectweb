@@ -8,9 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
-	"github.com/go-chi/cors"
+	"github.com/gin-contrib/cors"
+	"github.com/gin-gonic/gin"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/joho/godotenv"
 	"golang.org/x/time/rate"
@@ -24,7 +23,7 @@ import (
 	garbageWS       "civicconnectweb/backend/internal/garbage/websocket"
 )
 
-// â”€â”€ Rate limiter per IP for login endpoint â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Rate limiter per IP for login endpoint ──────────────────────────────────
 type ipLimiter struct {
 	limiter  *rate.Limiter
 	lastSeen time.Time
@@ -47,27 +46,29 @@ func getLoginLimiter(ip string) *rate.Limiter {
 	return l
 }
 
-func loginRateLimit(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ip := r.RemoteAddr
+func loginRateLimit() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ip := c.ClientIP()
 		if !getLoginLimiter(ip).Allow() {
-			http.Error(w, "Too many login attempts. Please wait a minute and try again.", http.StatusTooManyRequests)
+			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
+				"error": "Too many login attempts. Please wait a minute and try again.",
+			})
 			return
 		}
-		next.ServeHTTP(w, r)
-	})
+		c.Next()
+	}
 }
 
-// â”€â”€ Security headers middleware â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-func securityHeaders(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("X-Frame-Options", "DENY")
-		w.Header().Set("X-XSS-Protection", "1; mode=block")
-		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
-		w.Header().Set("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
-		next.ServeHTTP(w, r)
-	})
+// ── Security headers middleware ─────────────────────────────────────────────
+func securityHeaders() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("X-Content-Type-Options", "nosniff")
+		c.Header("X-Frame-Options", "DENY")
+		c.Header("X-XSS-Protection", "1; mode=block")
+		c.Header("Referrer-Policy", "strict-origin-when-cross-origin")
+		c.Header("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+		c.Next()
+	}
 }
 
 func main() {
@@ -105,109 +106,86 @@ func main() {
 	if err := db.Ping(); err != nil {
 		log.Fatalf("Unable to ping database: %v\n", err)
 	}
-	log.Println("âœ… Connected to database")
+	log.Println("✅ Connected to database")
 
 	hub  := garbageWS.NewHub()
 	repo := garbageRepo.New(db)
 	svc  := garbageService.NewDeviationService(repo, hub)
 	gHandler := garbageHandlers.New(repo, svc, hub)
 	go hub.Run()
-	log.Println("âœ… WebSocket hub started")
+	log.Println("✅ WebSocket hub started")
 
-	r := chi.NewRouter()
-	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
-	r.Use(middleware.RequestID)
-	r.Use(securityHeaders)
-	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins: []string{
-			"http://localhost:5173",
-			"http://localhost:3000",
-			"http://localhost:8080",
-			"http://127.0.0.1:5173",
-			"http://127.0.0.1:8080",
-			os.Getenv("FRONTEND_URL"), // Added for deployment
-		},
-		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
-		ExposedHeaders:   []string{"Link"},
+	r := gin.Default()
+	r.Use(securityHeaders())
+	r.Use(cors.New(cors.Config{
+		AllowOrigins:     []string{"http://localhost:*", "http://127.0.0.1:*"},
+		AllowOriginFunc:  func(origin string) bool { return true },
+		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
+		ExposeHeaders:    []string{"Link"},
 		AllowCredentials: true,
-		MaxAge:           300,
+		MaxAge:           300 * time.Second,
 	}))
 
 	// ── PUBLIC ROUTES ─────────────────────────────────────────────────────
-	r.With(loginRateLimit).Post("/api/bG9naW4", handlers.LoginHandler(db))
-	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"status":"ok","service":"civic-app-backend"}`))
+	r.POST("/api/bG9naW4", loginRateLimit(), handlers.LoginHandler(db))
+	r.GET("/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok", "service": "civic-app-backend"})
 	})
+	r.GET("/api/Y29tcGxhaW50cw", handlers.GetAllComplaintsHandler(db))
 
 	// ── PROTECTED ROUTES (require valid JWT) ──────────────────────────────
-	r.Group(func(r chi.Router) {
-		r.Use(appMiddleware.AuthMiddleware)
+	auth := r.Group("/")
+	auth.Use(appMiddleware.AuthMiddleware())
+	{
+		auth.POST("/api/YXNzaWduLW9mZmljZXI", handlers.AssignOfficerHandler(db))
+		auth.GET("/api/b2ZmaWNlcnM", handlers.GetOfficersHandler(db))
+		auth.GET("/api/dXNlcnMvbW9iaWxl", handlers.GetUserByMobileHandler(db))
+		auth.GET("/api/dXNlcnMvcm9sZQ", handlers.GetUsersByRoleHandler(db))
 
-		r.Post("/api/YXNzaWduLW9mZmljZXI", handlers.AssignOfficerHandler(db))
-		r.Get("/api/b2ZmaWNlcnM", handlers.GetOfficersHandler(db))
-		r.Get("/api/dXNlcnMvbW9iaWxl", handlers.GetUserByMobileHandler(db))
-		r.Get("/api/dXNlcnMvcm9sZQ", handlers.GetUsersByRoleHandler(db))
+		auth.POST("/api/Y29tcGxhaW50cw", handlers.CreateComplaintHandler(db))
+		auth.GET("/api/Y29tcGxhaW50cy93YXJk", handlers.GetComplaintsByWardHandler(db))
+		auth.GET("/api/Y29tcGxhaW50cy9zdGF0dXM", handlers.GetComplaintsByStatusHandler(db))
+		auth.GET("/api/Y29tcGxhaW50cy9zdGF0cw", handlers.GetStatusCountsHandler(db))
+		auth.GET("/api/Y29tcGxhaW50cy90eXBlLXN0YXRz", handlers.GetComplaintTypeStatsHandler(db))
 
-		r.Get("/api/c3RhdGlvbnM", handlers.GetAllStationsHandler(db))
-		r.Get("/api/c3RhdGlvbnMvdHlwZQ", handlers.GetStationsByTypeHandler(db))
-		r.Get("/api/ZXF1aXBtZW50", handlers.GetEquipmentByStationHandler(db))
+		auth.GET("/api/d29yay1vcmRlcnM", handlers.GetAllWorkOrdersHandler(db))
+		auth.GET("/api/d29yay1vcmRlcnMvc3RhZmY", handlers.GetWorkOrdersByStaffHandler(db))
 
-		r.Get("/api/Y29tcGxhaW50cw", handlers.GetAllComplaintsHandler(db))
-		r.Post("/api/Y29tcGxhaW50cw", handlers.CreateComplaintHandler(db))
-		r.Get("/api/Y29tcGxhaW50cy93YXJk", handlers.GetComplaintsByWardHandler(db))
-		r.Get("/api/Y29tcGxhaW50cy9zdGF0dXM", handlers.GetComplaintsByStatusHandler(db))
-		r.Get("/api/Y29tcGxhaW50cy9zdGF0cw", handlers.GetStatusCountsHandler(db))
-		r.Get("/api/Y29tcGxhaW50cy90eXBlLXN0YXRz", handlers.GetComplaintTypeStatsHandler(db))
+		auth.GET("/api/c3VydmV5cy9oZWFsdGgtc3RhdHM=", handlers.GetHealthSurveyStatsHandler(db))
+		auth.GET("/api/c3VydmV5cy93YXN0ZS1zdGF0cw==", handlers.GetWasteSurveyStatsHandler(db))
+		auth.GET("/api/ZGFzaGJvYXJkL29mZmljZXItc3RhdHM", handlers.GetOfficerStatsHandler(db))
 
-		r.Get("/api/d29yay1vcmRlcnM", handlers.GetAllWorkOrdersHandler(db))
-		r.Get("/api/d29yay1vcmRlcnMvc3RhZmY", handlers.GetWorkOrdersByStaffHandler(db))
+		// Garbage sub-routes
+		garbage := auth.Group("/api/Z2FyYmFnZQ")
+		{
+			garbage.GET("/trucks",              gHandler.ListTrucks)
+			garbage.GET("/trucks/:id",          gHandler.GetTruck)
+			garbage.GET("/trucks/:id/history",  gHandler.GetTruckHistory)
+			garbage.GET("/routes",              gHandler.GetAllRoutes)
+			garbage.GET("/routes/:vehicle",     gHandler.GetRoute)
+			garbage.GET("/deviations",          gHandler.ListDeviations)
+			garbage.GET("/stats",               gHandler.GetStats)
+			garbage.POST("/simulate",           gHandler.Simulate)
+		}
 
-		r.Get("/api/ZmF1bHRzL3N0YXRpb24", handlers.GetFaultsByStationHandler(db))
-		r.Get("/api/ZmF1bHRzL3BlbmRpbmc", handlers.GetPendingFaultsHandler(db))
+		auth.POST("/api/Z3Bz", gHandler.IngestGPS)
+	}
 
-		r.Get("/api/bG9ncy9saWZ0aW5n", handlers.GetLiftingLogsHandler(db))
-		r.Get("/api/bG9ncy9wdW1waW5n", handlers.GetPumpingLogsHandler(db))
-		r.Get("/api/bG9ncy9zdHA", handlers.GetSTPLogsHandler(db))
-
-		r.Get("/api/ZGFzaGJvYXJkL3N0YXRpb24tY291bnRz", handlers.GetStationCountsHandler(db))
-		r.Get("/api/ZGFzaGJvYXJkL29mZmljZXItc3RhdHM", handlers.GetOfficerStatsHandler(db))
-
-		r.Get("/api/ZW5lcmd5L3RyZW5k", handlers.GetEnergyTrendHandler(db))
-		r.Get("/api/c2xhL3RyZW5k", handlers.GetSLATrendHandler(db))
-
-		r.Route("/api/garbage", func(r chi.Router) {
-			r.Get("/trucks",              gHandler.ListTrucks)
-			r.Get("/trucks/{id}",         gHandler.GetTruck)
-			r.Get("/trucks/{id}/history", gHandler.GetTruckHistory)
-			r.Get("/routes",              gHandler.GetAllRoutes)
-			r.Get("/routes/{vehicle}",    gHandler.GetRoute)
-			r.Get("/deviations",          gHandler.ListDeviations)
-			r.Get("/stats",               gHandler.GetStats)
-			r.Post("/simulate",           gHandler.Simulate)
-		})
-
-		r.Post("/api/gps", gHandler.IngestGPS)
-	})
-
-	// WebSocket (public â€” GPS devices connect here)
-	r.Get("/ws/Z2FyYmFnZQ", gHandler.ServeWS)
+	// WebSocket (public — GPS devices connect here)
+	r.GET("/ws/Z2FyYmFnZQ", gHandler.ServeWS)
 
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8082"
 	}
 
-	log.Printf("ðŸš€ Civic App Backend running on :%s", port)
+	log.Printf("🚀 Civic App Backend running on :%s", port)
 	log.Printf("   REST API : http://localhost:%s/api/", port)
 	log.Printf("   WebSocket: ws://localhost:%s/ws/garbage", port)
 	log.Printf("   Health   : http://localhost:%s/health", port)
 
-	if err := http.ListenAndServe(":"+port, r); err != nil {
+	if err := r.Run(":" + port); err != nil {
 		log.Fatalf("Server failed to start: %v", err)
 	}
 }
-
-

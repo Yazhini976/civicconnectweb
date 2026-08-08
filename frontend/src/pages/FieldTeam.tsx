@@ -50,10 +50,10 @@ export default function FieldTeam() {
 
   // Officer name mapping for a professional look
   const OFFICER_NAMES: Record<string, string> = {
-    'da0be945-6d0b-4733-99eb-2eeace7d7f68': 'Admin Level 3 Officer 1',
-    'a69651a7-c2a2-48bc-9df2-025ec007cb56': 'Admin Level 3 Officer 2',
-    'aa1ebc25-5b07-4145-9687-56cfe92228e8': 'Admin Level 3 Officer 3',
-    'a7f9568c-3e6f-4763-87dc-3b6fd5660cc6': 'Admin Level 3 Officer 4',
+    'da0be945-6d0b-4733-99eb-2eeace7d7f68': 'Field Officer 1',
+    'a69651a7-c2a2-48bc-9df2-025ec007cb56': 'Field Officer 2',
+    'aa1ebc25-5b07-4145-9687-56cfe92228e8': 'Field Officer 3',
+    'a7f9568c-3e6f-4763-87dc-3b6fd5660cc6': 'Field Officer 4',
   };
 
   useEffect(() => {
@@ -62,7 +62,7 @@ export default function FieldTeam() {
       try {
         const [staffData, workOrdersData] = await Promise.all([
           getUsersByRole('FIELD_OFFICER'),
-          getWorkOrders(selectedDate)
+          getWorkOrders()
         ]);
         
         setWorkOrders(workOrdersData || []);
@@ -95,7 +95,7 @@ export default function FieldTeam() {
           return {
             id: staff.id,
             name: OFFICER_NAMES[staff.id] || staff.full_name || staff.username,
-            designation: 'Admin Level 3',
+            designation: 'Field Officer',
             status: 'Active', // Default
             currentWard: staff.ward_number || (
               staff.id === 'da0be945-6d0b-4733-99eb-2eeace7d7f68' ? '1-10' :
@@ -136,12 +136,23 @@ export default function FieldTeam() {
     : 100;
 
   const performanceData = activeOfficers.map((o) => ({
-    name: o.name.replace('Field ', '').replace('Admin Level 3 ', ''),
+    name: o.name.replace('Field ', ''),
     score: o.score,
     compliance: o.slaCompliancePercent,
     assigned: o.totalAssigned,
     resolved: o.resolvedCount,
   }));
+
+  const radarChartData = [...performanceData];
+  while (radarChartData.length > 0 && radarChartData.length < 3) {
+    radarChartData.push({
+      name: ' ',
+      score: 0,
+      compliance: 0,
+      assigned: 0,
+      resolved: 0,
+    });
+  }
 
   const officerColumns = [
     { key: 'name', header: 'Name' },
@@ -171,17 +182,17 @@ export default function FieldTeam() {
 
   if (loading) {
     return (
-      <DashboardLayout title="Admin Level 3" subtitle="Loading...">
+      <DashboardLayout title="Field Team" subtitle="Loading...">
         <div className="flex h-64 items-center justify-center">Loading team data...</div>
       </DashboardLayout>
     );
   }
 
   return (
-    <DashboardLayout title="Admin Level 3" subtitle={`Workforce management and performance tracking • ${selectedDate}`}>
+    <DashboardLayout title="Field Team" subtitle={`Workforce management and performance tracking • ${selectedDate}`}>
       <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <KPICard
-          title="Active Admins"
+          title="Active Officers"
           value={activeOfficers.length}
           icon={<HardHat className="h-5 w-5" />}
         />
@@ -204,7 +215,7 @@ export default function FieldTeam() {
         <div className="chart-container">
           <h4 className="mb-4 font-semibold">Top Performers Analysis</h4>
           <ResponsiveContainer width="100%" height={300}>
-            <RadarChart outerRadius={90} data={performanceData.slice(0, 5)}>
+            <RadarChart outerRadius={90} data={radarChartData.slice(0, 5)}>
               <PolarGrid stroke="hsl(var(--border))" />
               <PolarAngleAxis dataKey="name" tick={{ fontSize: 12 }} />
               <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fontSize: 10 }} />
@@ -251,7 +262,7 @@ export default function FieldTeam() {
 
       {/* Team Table */}
       <div className="mb-8">
-        <h4 className="mb-4 font-semibold">Admin Level 3 List</h4>
+        <h4 className="mb-4 font-semibold">Field Team List</h4>
         <DataTable data={officers} columns={officerColumns} maxHeight="400px" />
       </div>
 

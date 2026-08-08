@@ -18,10 +18,12 @@ interface AssignOfficerModalProps {
 }
 
 export function AssignOfficerModal({ isOpen, onClose, assignedByRole }: AssignOfficerModalProps) {
+  // Map user role to default team selection
+  const defaultTeam = assignedByRole === 'ae1' ? 'field' : 'survey';
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
-  const [role, setRole] = useState(assignedByRole || 'ae1');
+  const [team, setTeam] = useState(defaultTeam);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -41,14 +43,19 @@ export function AssignOfficerModal({ isOpen, onClose, assignedByRole }: AssignOf
     setLoading(true);
 
     try {
-      const res = await fetch(`${API_BASE_URL}/assign-officer`, {
+      const assignedBy = team === 'field' ? 'ae1' : 'ae2';
+      const token = localStorage.getItem('auth_token');
+      const res = await fetch(`${API_BASE_URL}/YXNzaWduLW9mZmljZXI`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify({
           phone_number: phone,
           name: name,
           password: password,
-          assigned_by: role,
+          assigned_by: assignedBy,
         }),
       });
 
@@ -129,13 +136,13 @@ export function AssignOfficerModal({ isOpen, onClose, assignedByRole }: AssignOf
           </div>
           <div>
             <label className="mb-1 block text-sm font-medium text-slate-700">Team</label>
-            <Select value={role} onValueChange={setRole} disabled={loading}>
+            <Select value={team} onValueChange={setTeam} disabled={loading}>
               <SelectTrigger>
                 <SelectValue placeholder="Select Team" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="ae1">Field Team</SelectItem>
-                <SelectItem value="ae2">Survey Team</SelectItem>
+                <SelectItem value="field">Field Team</SelectItem>
+                <SelectItem value="survey">Survey Team</SelectItem>
               </SelectContent>
             </Select>
           </div>

@@ -78,6 +78,17 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         parsed.modules = userModules;
         localStorage.setItem('user', JSON.stringify(parsed));
       }
+
+      // Ensure ae3 has all 5 modules
+      if (parsed.role === 'ae3' || parsed.username === 'ae3') {
+        const allModules = ['Water Utility', 'UGSS', 'Street Lighting', 'Solid Waste', 'Survey'];
+        const missingModules = allModules.filter(m => !userModules.includes(m));
+        if (missingModules.length > 0) {
+          userModules = [...new Set([...userModules, ...allModules])];
+          parsed.modules = userModules;
+          localStorage.setItem('user', JSON.stringify(parsed));
+        }
+      }
     }
   } catch (e) {
     // ignore

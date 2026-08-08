@@ -1,4 +1,4 @@
-﻿package handlers
+package handlers
 
 import (
 	"database/sql"
@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 
@@ -32,33 +33,74 @@ type LoginResponse struct {
 	Modules  []string `json:"modules"`
 }
 
-func LoginHandler(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+func LoginHandler(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
 		var req LoginRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "Invalid request body", http.StatusBadRequest)
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
 			return
 		}
 
 		var hash, role string
-		var modulesJSON []byte
-		err := db.QueryRow("SELECT password_hash, role, allowed_modules FROM app_users WHERE username = $1", req.Username).Scan(&hash, &role, &modulesJSON)
-		if err == sql.ErrNoRows {
-			http.Error(w, "Invalid credentials", http.StatusUnauthorized)
-			return
-		} else if err != nil {
-			http.Error(w, "Database error", http.StatusInternalServerError)
-			return
+		var modules []string
+
+		// Hybrid Login Logic: Check new schema first (for college server), fallback to app_users (for local)
+		
+		// 1. Try admin_users
+		err := db.QueryRow("SELECT password_hash FROM admin_users WHERE username = $1", req.Username).Scan(&hash)
+		if err == nil {
+			role = "admin"
+			modules = []string{"Water Utility", "UGSS", "Street Lighting", "Solid Waste", "Survey"}
+		} else {
+			// 2. Try ae_officers
+			var aeID int
+			var aeName string
+			err = db.QueryRow("SELECT ae_id, password_hash, ae_name FROM ae_officers WHERE phone_number = $1 OR ae_name = $1", req.Username).Scan(&aeID, &hash, &aeName)
+			if err == nil {
+				if aeName == "AE 3" || req.Username == "ae3" {
+					role = "ae3"
+				} else if aeName == "AE 2" || req.Username == "ae2" {
+					role = "ae2"
+				} else {
+					role = "ae1"
+				}
+
+				rows, _ := db.Query("SELECT m.module_name FROM ae_module_mapping am JOIN modules m ON am.module_id = m.module_id WHERE am.ae_id = $1", aeID)
+				if rows != nil {
+					defer rows.Close()
+					for rows.Next() {
+						var mName string
+						if err := rows.Scan(&mName); err == nil {
+							modules = append(modules, mName)
+						}
+					}
+				}
+			} else {
+				// 3. Try users (Citizens)
+				err = db.QueryRow("SELECT password_hash FROM users WHERE phone_number = $1", req.Username).Scan(&hash)
+				if err == nil {
+					role = "citizen"
+					modules = []string{"Water Utility", "UGSS", "Street Lighting", "Solid Waste", "Survey"}
+				}
+			}
+		}
+
+		// Fallback to old app_users schema if hash is still empty
+		if hash == "" {
+			var modulesJSON []byte
+			err := db.QueryRow("SELECT password_hash, role, allowed_modules FROM app_users WHERE username = $1", req.Username).Scan(&hash, &role, &modulesJSON)
+			if err != nil {
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
+				return
+			}
+			if err := json.Unmarshal(modulesJSON, &modules); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Error parsing modules"})
+				return
+			}
 		}
 
 		if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(req.Password)); err != nil {
-			http.Error(w, "Invalid credentials", http.StatusUnauthorized)
-			return
-		}
-
-		var modules []string
-		if err := json.Unmarshal(modulesJSON, &modules); err != nil {
-			http.Error(w, "Error parsing modules", http.StatusInternalServerError)
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
 			return
 		}
 
@@ -72,7 +114,7 @@ func LoginHandler(db *sql.DB) http.HandlerFunc {
 		signed, err := token.SignedString([]byte(os.Getenv("JWT_SECRET")))
 		if err != nil {
 			log.Printf("Error generating token: %v", err)
-			http.Error(w, "Error generating session token", http.StatusInternalServerError)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error generating session token"})
 			return
 		}
 
@@ -83,8 +125,7 @@ func LoginHandler(db *sql.DB) http.HandlerFunc {
 			Modules:  modules,
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		c.JSON(http.StatusOK, resp)
 	}
 }
 
@@ -92,247 +133,183 @@ func LoginHandler(db *sql.DB) http.HandlerFunc {
 // USER HANDLERS
 // ==========================================
 
-func GetUserByMobileHandler(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		mobile := r.URL.Query().Get("mobile")
+func GetUserByMobileHandler(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		mobile := c.Query("mobile")
 		if mobile == "" {
-			http.Error(w, "Missing mobile parameter", http.StatusBadRequest)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Missing mobile parameter"})
 			return
 		}
 
 		user, err := repository.GetUserByMobile(db, mobile)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(user)
+		c.JSON(http.StatusOK, user)
 	}
 }
 
-func GetUsersByRoleHandler(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		role := r.URL.Query().Get("role")
+func GetUsersByRoleHandler(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		role := c.Query("role")
 		if role == "" {
-			http.Error(w, "Missing role parameter", http.StatusBadRequest)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Missing role parameter"})
 			return
 		}
 
-		users, err := repository.GetUsersByRole(db, role)
+		userRole := c.Query("userRole")
+
+		users, err := repository.GetUsersByRole(db, role, userRole)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(users)
+		c.JSON(http.StatusOK, users)
 	}
 }
 
-func GetOfficerStatsHandler(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		stats, err := repository.GetOfficerStats(db)
+func GetOfficerStatsHandler(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		role := c.Query("role")
+		stats, err := repository.GetOfficerStats(db, role)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(stats)
+		c.JSON(http.StatusOK, stats)
 	}
 }
 
-func GetAllStationsHandler(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		stations, err := repository.GetAllStations(db)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(stations)
-	}
-}
-
-func GetStationsByTypeHandler(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		stationType := r.URL.Query().Get("type")
-		if stationType == "" {
-			http.Error(w, "Missing type parameter", http.StatusBadRequest)
-			return
-		}
-
-		stations, err := repository.GetStationsByType(db, stationType)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(stations)
-	}
-}
-
-func GetEquipmentByStationHandler(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		stationIDStr := r.URL.Query().Get("station_id")
-		if stationIDStr == "" {
-			http.Error(w, "Missing station_id parameter", http.StatusBadRequest)
-			return
-		}
-
-		stationID, err := strconv.Atoi(stationIDStr)
-		if err != nil {
-			http.Error(w, "Invalid station_id parameter", http.StatusBadRequest)
-			return
-		}
-
-		equipment, err := repository.GetEquipmentByStation(db, stationID)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(equipment)
-	}
-}
 
 // ==========================================
 // COMPLAINT HANDLERS
 // ==========================================
 
-func GetComplaintsByWardHandler(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		ward := r.URL.Query().Get("ward")
+func GetComplaintsByWardHandler(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ward := c.Query("ward")
 		if ward == "" {
-			http.Error(w, "Missing ward parameter", http.StatusBadRequest)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Missing ward parameter"})
 			return
 		}
 
 		complaints, err := repository.GetComplaintsByWard(db, ward)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(complaints)
+		c.JSON(http.StatusOK, complaints)
 	}
 }
 
-func GetComplaintsByStatusHandler(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		status := r.URL.Query().Get("status")
+func GetComplaintsByStatusHandler(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		status := c.Query("status")
 		if status == "" {
-			http.Error(w, "Missing status parameter", http.StatusBadRequest)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Missing status parameter"})
 			return
 		}
 
 		complaints, err := repository.GetComplaintsByStatus(db, status)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(complaints)
+		c.JSON(http.StatusOK, complaints)
 	}
 }
 
-func GetStatusCountsHandler(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		date := r.URL.Query().Get("date")
-		role := r.URL.Query().Get("role")
+func GetStatusCountsHandler(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		date := c.Query("date")
+		role := c.Query("role")
 		data, err := repository.GetStatusCounts(db, date, role)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(data)
+		c.JSON(http.StatusOK, data)
 	}
 }
 
-func GetComplaintTypeStatsHandler(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		date := r.URL.Query().Get("date")
-		role := r.URL.Query().Get("role")
+func GetComplaintTypeStatsHandler(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		date := c.Query("date")
+		role := c.Query("role")
 		data, err := repository.GetComplaintTypeStats(db, date, role)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(data)
+		c.JSON(http.StatusOK, data)
 	}
 }
 
-func GetEnergyTrendHandler(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		date := r.URL.Query().Get("date")
+func GetEnergyTrendHandler(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		date := c.Query("date")
 		data, err := repository.GetEnergyTrend(db, date)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(data)
+		c.JSON(http.StatusOK, data)
 	}
 }
 
-func GetSLATrendHandler(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		date := r.URL.Query().Get("date")
+func GetSLATrendHandler(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		date := c.Query("date")
 		data, err := repository.GetSLATrend(db, date)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(data)
+		c.JSON(http.StatusOK, data)
 	}
 }
 
-func GetAllComplaintsHandler(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		date := r.URL.Query().Get("date")
-		role := r.URL.Query().Get("role")
+func GetAllComplaintsHandler(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		date := c.Query("date")
+		role := c.Query("role")
 		complaints, err := repository.GetAllComplaints(db, date, role)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(complaints)
+		c.JSON(http.StatusOK, complaints)
 	}
 }
 
-func CreateComplaintHandler(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+func CreateComplaintHandler(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
 		var req repository.CreateComplaintRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "Invalid payload", http.StatusBadRequest)
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid payload"})
 			return
 		}
 		
 		newID, err := repository.CreateComplaint(db, req)
 		if err != nil {
 			log.Printf("Failed to create complaint: %v", err)
-			http.Error(w, "Database error", http.StatusInternalServerError)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		c.JSON(http.StatusCreated, gin.H{
 			"message": "Complaint created successfully",
 			"id":      newID,
 		})
@@ -343,171 +320,44 @@ func CreateComplaintHandler(db *sql.DB) http.HandlerFunc {
 // WORK ORDER HANDLERS
 // ==========================================
 
-func GetWorkOrdersByStaffHandler(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		staffIDStr := r.URL.Query().Get("staff_id")
+func GetWorkOrdersByStaffHandler(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		staffIDStr := c.Query("staff_id")
 		if staffIDStr == "" {
-			http.Error(w, "Missing staff_id parameter", http.StatusBadRequest)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Missing staff_id parameter"})
 			return
 		}
 
 		staffID, err := strconv.Atoi(staffIDStr)
 		if err != nil {
-			http.Error(w, "Invalid staff_id parameter", http.StatusBadRequest)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid staff_id parameter"})
 			return
 		}
 
 		workOrders, err := repository.GetWorkOrdersByStaff(db, staffID)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(workOrders)
+		c.JSON(http.StatusOK, workOrders)
 	}
 }
 
-func GetAllWorkOrdersHandler(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		date := r.URL.Query().Get("date")
+func GetAllWorkOrdersHandler(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		date := c.Query("date")
 		workOrders, err := repository.GetAllWorkOrders(db, date)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(workOrders)
+		c.JSON(http.StatusOK, workOrders)
 	}
 }
 
-// ==========================================
-// FAULT HANDLERS
-// ==========================================
 
-func GetFaultsByStationHandler(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		stationIDStr := r.URL.Query().Get("station_id")
-		if stationIDStr == "" {
-			http.Error(w, "Missing station_id parameter", http.StatusBadRequest)
-			return
-		}
-
-		stationID, err := strconv.Atoi(stationIDStr)
-		if err != nil {
-			http.Error(w, "Invalid station_id parameter", http.StatusBadRequest)
-			return
-		}
-
-		faults, err := repository.GetFaultsByStation(db, stationID)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(faults)
-	}
-}
-
-func GetPendingFaultsHandler(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		date := r.URL.Query().Get("date")
-		faults, err := repository.GetPendingFaults(db, date)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(faults)
-	}
-}
-
-// ==========================================
-// DASHBOARD HANDLER (NEW â€“ SAFE ADDITION)
-// ==========================================
-
-func GetStationCountsHandler(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		counts, err := repository.GetStationCounts(db)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(counts)
-	}
-}
-
-// ==========================================
-// LOG HANDLERS
-// ==========================================
-
-func GetLiftingLogsHandler(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		stationIDStr := r.URL.Query().Get("station_id")
-		date := r.URL.Query().Get("date")
-		if stationIDStr == "" {
-			http.Error(w, "Missing station_id", http.StatusBadRequest)
-			return
-		}
-		stationID, _ := strconv.Atoi(stationIDStr)
-
-		logs, err := repository.GetLiftingLogs(db, stationID, date)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(logs)
-	}
-}
-
-func GetPumpingLogsHandler(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		stationIDStr := r.URL.Query().Get("station_id")
-		date := r.URL.Query().Get("date")
-		if stationIDStr == "" {
-			http.Error(w, "Missing station_id", http.StatusBadRequest)
-			return
-		}
-		stationID, _ := strconv.Atoi(stationIDStr)
-
-		logs, err := repository.GetPumpingLogs(db, stationID, date)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(logs)
-	}
-}
-
-func GetSTPLogsHandler(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		stationIDStr := r.URL.Query().Get("station_id")
-		date := r.URL.Query().Get("date")
-		if stationIDStr == "" {
-			http.Error(w, "Missing station_id", http.StatusBadRequest)
-			return
-		}
-		stationID, _ := strconv.Atoi(stationIDStr)
-
-		logs, err := repository.GetSTPLogs(db, stationID, date)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(logs)
-	}
-}
 
 // ==========================================
 // ASSIGN OFFICER HANDLER
@@ -520,16 +370,16 @@ type AssignOfficerRequest struct {
 	AssignedBy  string `json:"assigned_by"` // "ae1" or "ae2"
 }
 
-func AssignOfficerHandler(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+func AssignOfficerHandler(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
 		var req AssignOfficerRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "Invalid request payload", http.StatusBadRequest)
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request payload"})
 			return
 		}
 
 		if req.PhoneNumber == "" || req.Name == "" || req.Password == "" {
-			http.Error(w, "Missing required fields", http.StatusBadRequest)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Missing required fields"})
 			return
 		}
 
@@ -537,7 +387,7 @@ func AssignOfficerHandler(db *sql.DB) http.HandlerFunc {
 		hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 		if err != nil {
 			log.Printf("Error processing password: %v", err)
-			http.Error(w, "Error processing password", http.StatusInternalServerError)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error processing password"})
 			return
 		}
 
@@ -547,7 +397,7 @@ func AssignOfficerHandler(db *sql.DB) http.HandlerFunc {
 		} else if req.AssignedBy == "ae2" {
 			tableName = "ae2_field_teams"
 		} else {
-			http.Error(w, "Invalid assigner role. Must be ae1 or ae2", http.StatusBadRequest)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid assigner role. Must be ae1 or ae2"})
 			return
 		}
 
@@ -557,16 +407,14 @@ func AssignOfficerHandler(db *sql.DB) http.HandlerFunc {
 			VALUES ($1, $2, $3, true, NOW())
 		`, tableName)
 
-		_, err = db.ExecContext(r.Context(), query, req.PhoneNumber, req.Name, string(hash))
+		_, err = db.ExecContext(c.Request.Context(), query, req.PhoneNumber, req.Name, string(hash))
 		if err != nil {
 			log.Printf("Failed to assign officer: %v", err)
-			http.Error(w, "Database error", http.StatusInternalServerError)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(map[string]string{"message": "Officer assigned successfully"})
+		c.JSON(http.StatusCreated, gin.H{"message": "Officer assigned successfully"})
 	}
 }
 
@@ -579,9 +427,9 @@ type OfficerResponse struct {
 	Name string `json:"name"`
 }
 
-func GetOfficersHandler(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		role := r.URL.Query().Get("role")
+func GetOfficersHandler(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		role := c.Query("role")
 		var query string
 		if role == "ae1" {
 			query = `SELECT phone_number, team_name FROM ae1_field_teams WHERE is_active = true`
@@ -590,14 +438,14 @@ func GetOfficersHandler(db *sql.DB) http.HandlerFunc {
 		} else if role == "admin" || role == "citizen" || role == "" {
 			query = `SELECT phone_number, team_name FROM ae1_field_teams WHERE is_active = true UNION SELECT phone_number, team_name FROM ae2_field_teams WHERE is_active = true`
 		} else {
-			http.Error(w, "Invalid role parameter", http.StatusBadRequest)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid role parameter"})
 			return
 		}
 
 		rows, err := db.Query(query)
 		if err != nil {
 			log.Printf("Failed to fetch officers: %v", err)
-			http.Error(w, "Database error", http.StatusInternalServerError)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
 			return
 		}
 		defer rows.Close()
@@ -612,10 +460,32 @@ func GetOfficersHandler(db *sql.DB) http.HandlerFunc {
 			officers = append(officers, o)
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(officers)
+		c.JSON(http.StatusOK, officers)
 	}
 }
 
+// ==========================================
+// SURVEY HANDLERS
+// ==========================================
 
+func GetHealthSurveyStatsHandler(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		stats, err := repository.GetHealthSurveyStats(db)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, stats)
+	}
+}
 
+func GetWasteSurveyStatsHandler(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		stats, err := repository.GetWasteSurveyStats(db)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, stats)
+	}
+}

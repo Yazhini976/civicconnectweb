@@ -10,50 +10,50 @@ import {
   Cell
 } from 'recharts';
 
-// Data from mockups
-const bplAplData = [
-  { name: 'APL', value: 53.7, color: '#f59e0b' },
-  { name: 'BPL', value: 46.3, color: '#003380' }
-];
+import React, { useState, useEffect } from 'react';
+import axios from 'axios';
 
-const genderData = [
-  { name: 'Male', value: 55.2, color: '#0ea5e9' },
-  { name: 'Female', value: 44.8, color: '#e11d48' }
-];
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8082';
+const COLORS = ['#f59e0b', '#003380', '#0ea5e9', '#e11d48', '#22c55e', '#8b5cf6', '#f97316', '#06b6d4'];
 
-const casteData = [
-  { name: 'BC', value: 12, color: '#003380' },
-  { name: 'MBC', value: 16, color: '#22c55e' },
-  { name: 'OC', value: 2, color: '#e11d48' },
-  { name: 'SC', value: 10, color: '#f59e0b' },
-  { name: 'ST', value: 6, color: '#8b5cf6' }
-];
-
-const insuranceData = [
-  { name: 'Yes', value: 65.2, color: '#8b5cf6' },
-  { name: 'No', value: 26.1, color: '#e11d48' },
-  { name: 'Unknown', value: 8.7, color: '#f59e0b' }
-];
-
-const incomeData = [
-  { name: 'Below ₹25,000', value: 15, color: '#22c55e' },
-  { name: 'Not Applicable', value: 111, color: '#e11d48' },
-  { name: '₹1,00,001 - ₹2,00,000', value: 17, color: '#f59e0b' },
-  { name: '₹2,00,001 - ₹5,00,000', value: 15, color: '#8b5cf6' },
-  { name: '₹25,001 - ₹50,000', value: 18, color: '#0ea5e9' },
-  { name: '₹50,001 - ₹1,00,000', value: 17, color: '#003380' }
-];
-const maxIncomeValue = Math.max(...incomeData.map(d => d.value));
-
-const sanitationData = [
-  { name: 'Community Toilet', value: 8, color: '#003380' },
-  { name: 'None', value: 11, color: '#22c55e' },
-  { name: 'Open Defecation', value: 9, color: '#e11d48' },
-  { name: 'Own Toilet', value: 10, color: '#f59e0b' },
-  { name: 'Shared Toilet', value: 8, color: '#8b5cf6' }
-];
+const addColors = (arr) => (arr || []).map((item, i) => ({ ...item, color: COLORS[i % COLORS.length] }));
 
 export function HealthSurvey() {
+  const [data, setData] = useState({
+    bplAplData: [],
+    genderData: [],
+    casteData: [],
+    insuranceData: [],
+    incomeData: [],
+    sanitationData: []
+  });
+
+  useEffect(() => {
+    const fetchStats = async () => {
+      try {
+        const token = localStorage.getItem('auth_token') || localStorage.getItem('token');
+        const res = await axios.get(`${API_URL}/api/c3VydmV5cy9oZWFsdGgtc3RhdHM=`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        setData({
+          bplAplData: addColors(res.data.bplAplData),
+          genderData: addColors(res.data.genderData),
+          casteData: addColors(res.data.casteData),
+          insuranceData: addColors(res.data.insuranceData),
+          incomeData: addColors(res.data.incomeData),
+          sanitationData: addColors(res.data.sanitationData)
+        });
+      } catch (err) {
+        console.error('Failed to fetch health stats:', err);
+      }
+    };
+    fetchStats();
+  }, []);
+
+  const { bplAplData, genderData, casteData, insuranceData, incomeData, sanitationData } = data;
+  const maxIncomeValue = Math.max(...incomeData.map(d => d.value), 1);
+
+
   return (
     <div className="space-y-6">
       

@@ -19,6 +19,33 @@ type User struct {
 	CreatedAt    time.Time `json:"created_at"`
 }
 
+type AEOfficer struct {
+	AEID         int       `json:"ae_id"`
+	AEName       string    `json:"ae_name"`
+	PhoneNumber  string    `json:"phone_number"`
+	PasswordHash string    `json:"-"`
+	IsActive     bool      `json:"is_active"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+type Module struct {
+	ModuleID   int    `json:"module_id"`
+	ModuleName string `json:"module_name"`
+}
+
+type AEModuleMapping struct {
+	MappingID int `json:"mapping_id"`
+	AEID      int `json:"ae_id"`
+	ModuleID  int `json:"module_id"`
+}
+
+type AdminUser struct {
+	ID           int       `json:"id"`
+	Username     string    `json:"username"`
+	PasswordHash string    `json:"-"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
 type OTPCode struct {
 	ID           int       `json:"id"`
 	MobileNumber string    `json:"mobile_number"`
@@ -54,7 +81,7 @@ type StationCount struct {
 }
 
 // ==========================================
-// COMPLAINTS & WORK ORDERS
+// COMPLAINTS & WORK ORDERS (Frontend Contract)
 // ==========================================
 
 type Complaint struct {
@@ -84,6 +111,16 @@ type ComplaintFeedback struct {
 	FeedbackText      *string `json:"feedback_text"`
 	ServiceRating     *int    `json:"service_rating"`
 	WorkQualityRating *int    `json:"work_quality_rating"`
+}
+
+type ComplaintUpdate struct {
+	UpdateID    int       `json:"update_id"`
+	ComplaintID string    `json:"complaint_id"`
+	AEID        *int      `json:"ae_id"`
+	OldStatus   *string   `json:"old_status"`
+	NewStatus   string    `json:"new_status"`
+	Remarks     *string   `json:"remarks"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 type WorkOrder struct {
@@ -152,6 +189,125 @@ type PropertyMaster struct {
 	StreetName *string  `json:"street_name"`
 	Latitude   *float64 `json:"latitude"`
 	Longitude  *float64 `json:"longitude"`
+}
+
+// ==========================================
+// SURVEYS & WARDS (New for civic_data)
+// ==========================================
+
+type Ward struct {
+	ID       int    `json:"id"`
+	WardNo   int    `json:"ward_no"`
+	WardName string `json:"ward_name"`
+	LGDCode  *int   `json:"lgd_code"`
+}
+
+type Survey struct {
+	ID               int       `json:"id"`
+	SurveyID         *string   `json:"survey_id"`
+	Ward             string    `json:"ward"`
+	Head             string    `json:"head"`
+	Phone            string    `json:"phone"`
+	Door             string    `json:"door"`
+	Street           string    `json:"street"`
+	FamNo            *string   `json:"famno"`
+	Ration           *string   `json:"ration"`
+	ABHA             *string   `json:"abha"`
+	PMJA             *string   `json:"pmja"`
+	PHR              *string   `json:"phr"`
+	Smartcard        *string   `json:"smartcard"`
+	BPL              *string   `json:"bpl"`
+	Caste            *string   `json:"caste"`
+	Insurance        *string   `json:"insurance"`
+	Housing          *string   `json:"housing"`
+	Water            *string   `json:"water"`
+	Toilet           *string   `json:"toilet"`
+	HHSize           *string   `json:"hh_size"`
+	WasteAmount      *string   `json:"waste_amount"`
+	WasteTypes       *string   `json:"waste_types"`
+	WasteDisposal    *string   `json:"waste_disposal"`
+	WasteSegregation *string   `json:"waste_segregation"`
+	WasteFrequency   *string   `json:"waste_frequency"`
+	Status           *string   `json:"status"`
+	Collector        *string   `json:"collector"`
+	SurveyDate       *string   `json:"survey_date"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+type EligibleCouple struct {
+	ID                    int       `json:"id"`
+	SurveyID              *int      `json:"survey_id"`
+	ECNo                  *string   `json:"ecno"`
+	HusbandName           *string   `json:"husband_name"`
+	WifeName              *string   `json:"wife_name"`
+	RCHID                 *string   `json:"rchid"`
+	RegDate               *string   `json:"reg_date"`
+	BankAC                *string   `json:"bank_ac"`
+	BankBranch            *string   `json:"bank_branch"`
+	HusbandAgeAtMarriage  *string   `json:"husband_age_at_marriage"`
+	WifeAgeAtMarriage     *string   `json:"wife_age_at_marriage"`
+	MotherCurrentAge      *string   `json:"mother_current_age"`
+	TotalPregnancies      *string   `json:"total_pregnancies"`
+	LivingSons            *string   `json:"living_sons"`
+	LivingDaughters       *string   `json:"living_daughters"`
+	Abortions             *string   `json:"abortions"`
+	YoungestChildDOB      *string   `json:"youngest_child_dob"`
+	LastDeliveryDate      *string   `json:"last_delivery_date"`
+	PregnancyTest         *string   `json:"pregnancy_test"`
+	ANNumber              *string   `json:"an_number"`
+	ANCDone               *string   `json:"anc_done"`
+	ANCDate               *string   `json:"anc_date"`
+	NextVisit             *string   `json:"next_visit"`
+	PlannedDeliveryPlace  *string   `json:"planned_delivery_place"`
+	CurrentHealthStatus   *string   `json:"current_health_status"`
+	Remarks               *string   `json:"remarks"`
+}
+
+type FamilyMember struct {
+	ID                 int     `json:"id"`
+	SurveyID           *int    `json:"survey_id"`
+	MemNo              *string `json:"memno"`
+	Name               string  `json:"name"`
+	Rel                *string `json:"rel"`
+	DOB                *string `json:"dob"`
+	Age                *string `json:"age"`
+	Gender             *string `json:"gender"`
+	Aadhar             *string `json:"aadhar"`
+	Mobile             *string `json:"mobile"`
+	Blood              *string `json:"blood"`
+	Marital            *string `json:"marital"`
+	Edu                *string `json:"edu"`
+	Occ                *string `json:"occ"`
+	Income             *string `json:"income"`
+	Religion           *string `json:"religion"`
+	Disability         *string `json:"disability"`
+	HasChronicDisease  *string `json:"has_chronic_disease"`
+	ChronicNCD         *string `json:"chronic_ncd"`
+	ChronicCD          *string `json:"chronic_cd"`
+	TreatmentPlace     *string `json:"treatment_place"`
+	Schemes            *string `json:"schemes"`
+	Vaccination        *string `json:"vaccination"`
+	Remarks            *string `json:"remarks"`
+}
+
+type SurveyCorrection struct {
+	ID            int       `json:"id"`
+	SurveyID      *string   `json:"survey_id"`
+	CitizenPhone  *string   `json:"citizen_phone"`
+	SurveyorName  *string   `json:"surveyor_name"`
+	RequestReason *string   `json:"request_reason"`
+	Status        string    `json:"status"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+type OfficerStats struct {
+	ID                   string  `json:"id"`
+	Name                 string  `json:"name"`
+	TotalAssigned        int     `json:"total_assigned"`
+	Resolved             int     `json:"resolved"`
+	SLACompliancePercent float64 `json:"sla_compliance_percent"`
+	Score                float64 `json:"score"`
 }
 
 // ==========================================
@@ -252,43 +408,4 @@ type STPDailyLog struct {
 	ChlorineUsage       *float64  `json:"chlorine_usage"`
 	PolymerUsage        *float64  `json:"polymer_usage"`
 	ChemicalStockStatus *string   `json:"chemical_stock_status"`
-}
-
-type OfficerStats struct {
-	ID                   string  `json:"id"`
-	Name                 string  `json:"name"`
-	TotalAssigned        int     `json:"total_assigned"`
-	Resolved             int     `json:"resolved"`
-	SLACompliancePercent float64 `json:"sla_compliance_percent"`
-	Score                float64 `json:"score"`
-}
-
-// ==========================================
-// NEW DB SCHEMAS FOR CIVICAPPFINAL
-// ==========================================
-
-type DBFieldOfficer struct {
-	OfficerID   int       `json:"officer_id"`
-	ModuleID    int       `json:"module_id"`
-	OfficerName string    `json:"officer_name"`
-	PhoneNumber string    `json:"phone_number"`
-	WardFrom    int       `json:"ward_from"`
-	WardTo      int       `json:"ward_to"`
-	IsActive    bool      `json:"is_active"`
-	CreatedAt   time.Time `json:"created_at"`
-}
-
-type DBComplaintUpdate struct {
-	UpdateID    int       `json:"update_id"`
-	ComplaintID string    `json:"complaint_id"`
-	OfficerID   int       `json:"officer_id"`
-	OldStatus   string    `json:"old_status"`
-	NewStatus   string    `json:"new_status"`
-	Remarks     string    `json:"remarks"`
-	UpdatedAt   time.Time `json:"updated_at"`
-}
-
-type DBModule struct {
-	ModuleID   int    `json:"module_id"`
-	ModuleName string `json:"module_name"`
 }

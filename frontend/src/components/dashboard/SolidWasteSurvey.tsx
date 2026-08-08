@@ -10,38 +10,45 @@ import {
   Cell
 } from 'recharts';
 
-const wasteDisposalData = [
-  { name: 'Municipal collection', value: 15, color: '#f59e0b' },
-  { name: 'Private collector', value: 2, color: '#1d4ed8' },
-  { name: 'Community bin', value: 13, color: '#e11d48' },
-  { name: 'Dumping in open areas', value: 6, color: '#2563eb' },
-  { name: 'Burning', value: 8, color: '#8b5cf6' },
-  { name: 'Composting', value: 4, color: '#22c55e' },
-  { name: 'Recycling/Scrap dealer', value: 2, color: '#f97316' },
-  { name: 'Other', value: 1, color: '#06b6d4' }
-];
+import React, { useState, useEffect } from 'react';
 
-const maxDisposalValue = Math.max(...wasteDisposalData.map(d => d.value));
 
-const wasteSegregationData = [
-  { name: 'Sometimes', value: 16, color: '#f59e0b' },
-  { name: 'Never', value: 16, color: '#003380' },
-  { name: 'Always', value: 14, color: '#e11d48' }
-];
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8082';
+const COLORS = ['#f59e0b', '#1d4ed8', '#e11d48', '#2563eb', '#8b5cf6', '#22c55e', '#f97316', '#06b6d4'];
 
-const wasteTypesData = [
-  { name: 'Sanitary Waste', value: 0, color: '#cbd5e1' }, // Dummy to keep spacing
-  { name: 'Textile', value: 11, color: '#003380' },
-  { name: 'Metal', value: 10, color: '#e11d48' },
-  { name: 'Paper/Cardboard', value: 10, color: '#003380' },
-  { name: 'E-Waste', value: 0, color: '#cbd5e1' }, // Dummy
-  { name: 'Glass', value: 10, color: '#22c55e' },
-  { name: 'Garden Waste', value: 0, color: '#cbd5e1' }, // Dummy
-  { name: 'Food/Biodegradable', value: 8, color: '#06b6d4' },
-  { name: 'Plastic', value: 7, color: '#f59e0b' }
-];
+const addColors = (arr) => (arr || []).map((item, i) => ({ ...item, color: COLORS[i % COLORS.length] }));
 
 export function SolidWasteSurvey() {
+  const [data, setData] = useState({
+    wasteDisposalData: [],
+    wasteSegregationData: [],
+    wasteTypesData: []
+  });
+
+  useEffect(() => {
+    const fetchStats = async () => {
+      try {
+        const token = localStorage.getItem('auth_token') || localStorage.getItem('token');
+        const res = await fetch(`${API_URL}/api/c3VydmV5cy93YXN0ZS1zdGF0cw==`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        const resData = await res.json();
+        setData({
+          wasteDisposalData: addColors(resData.wasteDisposalData),
+          wasteSegregationData: addColors(resData.wasteSegregationData),
+          wasteTypesData: addColors(resData.wasteTypesData)
+        });
+      } catch (err) {
+        console.error('Failed to fetch waste stats:', err);
+      }
+    };
+    fetchStats();
+  }, []);
+
+  const { wasteDisposalData, wasteSegregationData, wasteTypesData } = data;
+  const maxDisposalValue = Math.max(...wasteDisposalData.map(d => d.value), 1);
+
+
   return (
     <div className="space-y-6">
       <div className="grid gap-6 lg:grid-cols-2">

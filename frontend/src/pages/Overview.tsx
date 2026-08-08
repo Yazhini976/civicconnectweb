@@ -145,8 +145,9 @@ export default function Overview() {
         setOfficerStats(officerData || []);
 
         // Calculate all-time totals from the untyped status object
-        const totalAll = Object.values(allTimeComplaints || {}).reduce((a: any, b: any) => a + b, 0);
-        setAllTimeStatsObj(allTimeComplaints || {});
+        const safeAllTimeComplaints = (allTimeComplaints && typeof allTimeComplaints === 'object' && !('error' in allTimeComplaints)) ? allTimeComplaints : {};
+        const totalAll = Object.values(safeAllTimeComplaints).reduce((acc: number, val: any) => acc + (typeof val === 'number' ? val : 0), 0);
+        setAllTimeStatsObj(safeAllTimeComplaints);
         setAllTimeStats({
           complaints: Number(totalAll) || 0,
           faults: (allTimeFaults || []).length
@@ -164,9 +165,10 @@ export default function Overview() {
   /* =======================
      DERIVED DATA
      ======================= */
-  const totalComplaints = Object.values(complaintStats).reduce((a, b) => a + b, 0);
-  const resolvedCount = complaintStats['Resolved'] || 0;
-  const pendingCount = totalComplaints - resolvedCount;
+  const safeComplaintStats = (complaintStats && typeof complaintStats === 'object' && !('error' in complaintStats)) ? complaintStats : {};
+  const totalComplaints = Object.values(safeComplaintStats).reduce((acc: number, val: any) => acc + (typeof val === 'number' ? val : 0), 0);
+  const resolvedCount = typeof safeComplaintStats['Resolved'] === 'number' ? safeComplaintStats['Resolved'] : 0;
+  const pendingCount = Math.max(0, totalComplaints - resolvedCount);
 
   const liftingStations = stations.filter((s) => s.type === 'Lifting Station' || s.type === 'lifting');
   const pumpingStations = stations.filter((s) => s.type === 'Pumping Station' || s.type === 'pumping');

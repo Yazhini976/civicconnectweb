@@ -1,14 +1,13 @@
-﻿package handlers
+package handlers
 
 import (
-	"encoding/json"
 	"log"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5"
+	"github.com/gin-gonic/gin"
 
 	"civicconnectweb/backend/internal/garbage/models"
 	"civicconnectweb/backend/internal/garbage/repository"
@@ -30,201 +29,188 @@ func New(repo *repository.GarbageRepository, svc *service.DeviationService, hub 
 	return &GarbageHandler{repo: repo, service: svc, hub: hub}
 }
 
-// â”€â”€ Helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
-func respond(w http.ResponseWriter, code int, v interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(v)
-}
-
-func respondError(w http.ResponseWriter, code int, msg string) {
-	respond(w, code, map[string]string{"error": msg})
-}
-
 // ================================================================
 // GET /api/garbage/trucks
 // ================================================================
-func (h *GarbageHandler) ListTrucks(w http.ResponseWriter, r *http.Request) {
-	trucks, err := h.repo.GetAllTrucks(r.Context())
+func (h *GarbageHandler) ListTrucks(c *gin.Context) {
+	trucks, err := h.repo.GetAllTrucks(c.Request.Context())
 	if err != nil {
 		log.Printf("[HANDLER] ListTrucks error: %v", err)
-		respondError(w, http.StatusInternalServerError, "failed to load trucks")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load trucks"})
 		return
 	}
 	if trucks == nil {
 		trucks = []models.GarbageTruck{}
 	}
-	respond(w, http.StatusOK, trucks)
+	c.JSON(http.StatusOK, trucks)
 }
 
 // ================================================================
-// GET /api/garbage/trucks/{id}
+// GET /api/garbage/trucks/:id
 // ================================================================
-func (h *GarbageHandler) GetTruck(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.Atoi(chi.URLParam(r, "id"))
+func (h *GarbageHandler) GetTruck(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		respondError(w, http.StatusBadRequest, "invalid truck id")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid truck id"})
 		return
 	}
-	truck, err := h.repo.GetTruckByID(r.Context(), id)
+	truck, err := h.repo.GetTruckByID(c.Request.Context(), id)
 	if err != nil {
-		respondError(w, http.StatusNotFound, "truck not found")
+		c.JSON(http.StatusNotFound, gin.H{"error": "truck not found"})
 		return
 	}
-	respond(w, http.StatusOK, truck)
+	c.JSON(http.StatusOK, truck)
 }
 
 // ================================================================
-// GET /api/garbage/trucks/{id}/history?limit=100
+// GET /api/garbage/trucks/:id/history?limit=100
 // ================================================================
-func (h *GarbageHandler) GetTruckHistory(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.Atoi(chi.URLParam(r, "id"))
+func (h *GarbageHandler) GetTruckHistory(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		respondError(w, http.StatusBadRequest, "invalid truck id")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid truck id"})
 		return
 	}
 	limit := 200
-	if l := r.URL.Query().Get("limit"); l != "" {
+	if l := c.Query("limit"); l != "" {
 		if n, e := strconv.Atoi(l); e == nil && n > 0 {
 			limit = n
 		}
 	}
-	logs, err := h.repo.GetTruckGPSHistory(r.Context(), id, limit)
+	logs, err := h.repo.GetTruckGPSHistory(c.Request.Context(), id, limit)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, "failed to load history")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load history"})
 		return
 	}
 	if logs == nil {
 		logs = []models.GPSLog{}
 	}
-	respond(w, http.StatusOK, logs)
+	c.JSON(http.StatusOK, logs)
 }
 
 // ================================================================
-// POST /api/gps  â€” main GPS ingest endpoint
+// POST /api/gps  — main GPS ingest endpoint
 // Body: { "truck_id": 1, "latitude": 10.78, "longitude": 77.83, "speed": 5.2, "heading": 90, "timestamp": "..." }
 // ================================================================
-func (h *GarbageHandler) IngestGPS(w http.ResponseWriter, r *http.Request) {
+func (h *GarbageHandler) IngestGPS(c *gin.Context) {
 	var update models.GPSUpdate
-	if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
-		respondError(w, http.StatusBadRequest, "invalid JSON body")
+	if err := c.ShouldBindJSON(&update); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON body"})
 		return
 	}
 
 	if update.TruckID == 0 {
-		respondError(w, http.StatusBadRequest, "truck_id is required")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "truck_id is required"})
 		return
 	}
 	if update.Latitude == 0 || update.Longitude == 0 {
-		respondError(w, http.StatusBadRequest, "latitude and longitude are required")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "latitude and longitude are required"})
 		return
 	}
 	if update.Timestamp.IsZero() {
 		update.Timestamp = time.Now().UTC()
 	}
 
-	if err := h.service.ProcessGPSUpdate(r.Context(), update); err != nil {
+	if err := h.service.ProcessGPSUpdate(c.Request.Context(), update); err != nil {
 		log.Printf("[GPS] ProcessGPSUpdate error: %v", err)
-		respondError(w, http.StatusInternalServerError, "failed to process GPS update")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to process GPS update"})
 		return
 	}
 
-	respond(w, http.StatusOK, map[string]string{"status": "ok"})
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
 // ================================================================
-// GET /api/garbage/routes/{vehicle}
+// GET /api/garbage/routes/:vehicle
 // Returns GeoJSON of the vehicle's official assigned route
 // ================================================================
-func (h *GarbageHandler) GetRoute(w http.ResponseWriter, r *http.Request) {
-	vehicle := strings.ToUpper(chi.URLParam(r, "vehicle"))
-	route, err := h.repo.GetRouteByVehicleName(r.Context(), vehicle)
+func (h *GarbageHandler) GetRoute(c *gin.Context) {
+	vehicle := strings.ToUpper(c.Param("vehicle"))
+	route, err := h.repo.GetRouteByVehicleName(c.Request.Context(), vehicle)
 	if err != nil {
-		respondError(w, http.StatusNotFound, "route not found for vehicle: "+vehicle)
+		c.JSON(http.StatusNotFound, gin.H{"error": "route not found for vehicle: " + vehicle})
 		return
 	}
-	respond(w, http.StatusOK, route)
+	c.JSON(http.StatusOK, route)
 }
 
 // ================================================================
-// GET /api/garbage/routes  â€” all routes as GeoJSON features
+// GET /api/garbage/routes  — all routes as GeoJSON features
 // ================================================================
-func (h *GarbageHandler) GetAllRoutes(w http.ResponseWriter, r *http.Request) {
-	routes, err := h.repo.GetAllRoutesGeoJSON(r.Context())
+func (h *GarbageHandler) GetAllRoutes(c *gin.Context) {
+	routes, err := h.repo.GetAllRoutesGeoJSON(c.Request.Context())
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, "failed to load routes")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load routes"})
 		return
 	}
-	respond(w, http.StatusOK, routes)
+	c.JSON(http.StatusOK, routes)
 }
 
 // ================================================================
 // GET /api/garbage/deviations
 // Query params: vehicle, date (YYYY-MM-DD), severity, status, limit, offset
 // ================================================================
-func (h *GarbageHandler) ListDeviations(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	limit, _ := strconv.Atoi(q.Get("limit"))
-	offset, _ := strconv.Atoi(q.Get("offset"))
+func (h *GarbageHandler) ListDeviations(c *gin.Context) {
+	limit, _ := strconv.Atoi(c.Query("limit"))
+	offset, _ := strconv.Atoi(c.Query("offset"))
 	if limit == 0 {
 		limit = 100
 	}
 
 	filter := models.DeviationFilter{
-		Vehicle:  q.Get("vehicle"),
-		Date:     q.Get("date"),
-		Severity: q.Get("severity"),
-		Status:   q.Get("status"),
+		Vehicle:  c.Query("vehicle"),
+		Date:     c.Query("date"),
+		Severity: c.Query("severity"),
+		Status:   c.Query("status"),
 		Limit:    limit,
 		Offset:   offset,
 	}
 
-	devs, err := h.repo.GetDeviations(r.Context(), filter)
+	devs, err := h.repo.GetDeviations(c.Request.Context(), filter)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, "failed to load deviations")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load deviations"})
 		return
 	}
 	if devs == nil {
 		devs = []models.RouteDeviation{}
 	}
-	respond(w, http.StatusOK, devs)
+	c.JSON(http.StatusOK, devs)
 }
 
 // ================================================================
-// GET /api/garbage/stats  â€” fleet summary stats
+// GET /api/garbage/stats  — fleet summary stats
 // ================================================================
-func (h *GarbageHandler) GetStats(w http.ResponseWriter, r *http.Request) {
-	stats, err := h.repo.GetFleetStats(r.Context())
+func (h *GarbageHandler) GetStats(c *gin.Context) {
+	stats, err := h.repo.GetFleetStats(c.Request.Context())
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, "failed to load stats")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load stats"})
 		return
 	}
 	// Add active timer count
-	respond(w, http.StatusOK, map[string]interface{}{
+	c.JSON(http.StatusOK, gin.H{
 		"fleet":               stats,
 		"active_grace_timers": h.service.ActiveTimerCount(),
 	})
 }
 
 // ================================================================
-// GET /ws/garbage  â€” WebSocket live feed
+// GET /ws/garbage  — WebSocket live feed
 // ================================================================
-func (h *GarbageHandler) ServeWS(w http.ResponseWriter, r *http.Request) {
-	h.hub.ServeWS(w, r)
+func (h *GarbageHandler) ServeWS(c *gin.Context) {
+	h.hub.ServeWS(c.Writer, c.Request)
 }
 
 // ================================================================
-// POST /api/garbage/simulate  â€” GPS simulation trigger
+// POST /api/garbage/simulate  — GPS simulation trigger
 // Body: { "scenario": 1, "truck_id": 1 }
 // ================================================================
-func (h *GarbageHandler) Simulate(w http.ResponseWriter, r *http.Request) {
+func (h *GarbageHandler) Simulate(c *gin.Context) {
 	var req struct {
 		Scenario int `json:"scenario"`
 		TruckID  int `json:"truck_id"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondError(w, http.StatusBadRequest, "invalid request body")
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 		return
 	}
 	if req.TruckID == 0 {
@@ -235,11 +221,9 @@ func (h *GarbageHandler) Simulate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	go RunSimulatorScenario(h.service, req.TruckID, req.Scenario)
-	respond(w, http.StatusOK, map[string]interface{}{
+	c.JSON(http.StatusOK, gin.H{
 		"status":   "simulation started",
 		"scenario": req.Scenario,
 		"truck_id": req.TruckID,
 	})
 }
-
-

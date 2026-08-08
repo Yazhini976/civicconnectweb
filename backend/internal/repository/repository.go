@@ -1,4 +1,4 @@
-﻿package repository
+package repository
 
 import (
 	"database/sql"
@@ -46,23 +46,33 @@ func GetUserByMobile(db *sql.DB, mobile string) (*models.User, error) {
 	return &user, nil
 }
 
-func GetUsersByRole(db *sql.DB, role string) ([]models.User, error) {
+func GetUsersByRole(db *sql.DB, role string, userRole string) ([]models.User, error) {
 	var rows *sql.Rows
 	var err error
 
 	if strings.ToUpper(role) == "FIELD_OFFICER" {
-		rows, err = db.Query(`
-			WITH all_officers AS (
-				SELECT phone_number as officer_id, phone_number, team_name as officer_name, created_at FROM ae1_field_teams
+		if userRole == "ae1" {
+			rows, err = db.Query(`
+				SELECT phone_number as id, phone_number, 'FIELD_OFFICER' as role, created_at, team_name as officer_name, '' as ward_number
+				FROM ae1_field_teams WHERE is_active = true
+			`)
+		} else if userRole == "ae2" {
+			rows, err = db.Query(`
+				SELECT phone_number as id, phone_number, 'FIELD_OFFICER' as role, created_at, team_name as officer_name, '' as ward_number
+				FROM ae2_field_teams WHERE is_active = true
+			`)
+		} else {
+			rows, err = db.Query(`
+				SELECT phone_number as id, phone_number, 'FIELD_OFFICER' as role, created_at, team_name as officer_name, '' as ward_number
+				FROM ae1_field_teams WHERE is_active = true
 				UNION ALL
-				SELECT phone_number as officer_id, phone_number, team_name as officer_name, created_at FROM ae2_officers
-			)
-			SELECT officer_id, phone_number, 'FIELD_OFFICER' as role, created_at, officer_name, '' as ward_number
-			FROM all_officers
-		`)
+				SELECT phone_number as id, phone_number, 'FIELD_OFFICER' as role, created_at, team_name as officer_name, '' as ward_number
+				FROM ae2_field_teams WHERE is_active = true
+			`)
+		}
 	} else {
 		rows, err = db.Query(`
-			SELECT user_id::text, phone_number, '' as role, created_at, phone_number as officer_name, '' as ward_number
+			SELECT user_id::text, phone_number, '' as role, created_at, name as officer_name, '' as ward_number
 			FROM users WHERE false
 		`)
 	}
@@ -92,25 +102,61 @@ func GetUsersByRole(db *sql.DB, role string) ([]models.User, error) {
 	return users, nil
 }
 
-func GetOfficerStats(db *sql.DB) ([]models.OfficerStats, error) {
-	query := `
-		WITH all_officers AS (
-			SELECT phone_number as officer_id, team_name as officer_name, phone_number FROM ae1_field_teams
-			UNION ALL
-			SELECT phone_number as officer_id, team_name as officer_name, phone_number FROM ae2_officers
-		)
+func GetOfficerStats(db *sql.DB, role string) ([]models.OfficerStats, error) {
+	var query string
+	if role == "ae1" {
+		query = `
 		SELECT 
-			fo.officer_id, 
-			fo.officer_name, 
-			COUNT(c.complaint_id) as total,
-			SUM(CASE WHEN UPPER(c.status) IN ('COMPLETED', 'REJECTED') THEN 1 ELSE 0 END) as resolved
-		FROM all_officers fo
-		LEFT JOIN complaints c ON c.assigned_officer_phone = fo.phone_number
-		GROUP BY fo.officer_id, fo.officer_name
-	`
+			a.phone_number as id,
+			a.team_name as name,
+			COUNT(c.complaint_id) as total_assigned,
+			COUNT(c.complaint_id) FILTER (WHERE UPPER(c.status) IN ('COMPLETED', 'RESOLVED')) as resolved
+		FROM ae1_field_teams a
+		LEFT JOIN complaints c ON c.assigned_officer_phone = a.phone_number
+		GROUP BY a.phone_number, a.team_name
+		ORDER BY total_assigned DESC
+		`
+	} else if role == "ae2" {
+		query = `
+		SELECT 
+			a.phone_number as id,
+			a.team_name as name,
+			COUNT(c.complaint_id) as total_assigned,
+			COUNT(c.complaint_id) FILTER (WHERE UPPER(c.status) IN ('COMPLETED', 'RESOLVED')) as resolved
+		FROM ae2_field_teams a
+		LEFT JOIN complaints c ON c.assigned_officer_phone = a.phone_number
+		GROUP BY a.phone_number, a.team_name
+		ORDER BY total_assigned DESC
+		`
+	} else {
+		query = `
+		SELECT id, name, SUM(total_assigned) as total_assigned, SUM(resolved) as resolved
+		FROM (
+			SELECT 
+				a.phone_number as id,
+				a.team_name as name,
+				COUNT(c.complaint_id) as total_assigned,
+				COUNT(c.complaint_id) FILTER (WHERE UPPER(c.status) IN ('COMPLETED', 'RESOLVED')) as resolved
+			FROM ae1_field_teams a
+			LEFT JOIN complaints c ON c.assigned_officer_phone = a.phone_number
+			GROUP BY a.phone_number, a.team_name
+			UNION ALL
+			SELECT 
+				a.phone_number as id,
+				a.team_name as name,
+				COUNT(c.complaint_id) as total_assigned,
+				COUNT(c.complaint_id) FILTER (WHERE UPPER(c.status) IN ('COMPLETED', 'RESOLVED')) as resolved
+			FROM ae2_field_teams a
+			LEFT JOIN complaints c ON c.assigned_officer_phone = a.phone_number
+			GROUP BY a.phone_number, a.team_name
+		) AS combined
+		GROUP BY id, name
+		ORDER BY total_assigned DESC
+		`
+	}
 	rows, err := db.Query(query)
 	if err != nil {
-		return []models.OfficerStats{}, nil
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -570,55 +616,92 @@ func GetAllWorkOrders(db *sql.DB, dateFilter string) ([]models.WorkOrder, error)
 	return wos, nil
 }
 
+
+
+
+
 // ==========================================
-// FAULT REPOSITORY
+// SURVEY STATS
 // ==========================================
 
-func GetFaultsByStation(db *sql.DB, stationID int) ([]models.Fault, error) {
-	return []models.Fault{}, nil
+type StatData struct {
+	Name  string  `json:"name"`
+	Value float64 `json:"value"`
 }
 
-func GetPendingFaults(db *sql.DB, dateFilter string) ([]models.Fault, error) {
-	return []models.Fault{}, nil
+type HealthStats struct {
+	BPLAplData     []StatData `json:"bplAplData"`
+	GenderData     []StatData `json:"genderData"`
+	CasteData      []StatData `json:"casteData"`
+	InsuranceData  []StatData `json:"insuranceData"`
+	IncomeData     []StatData `json:"incomeData"`
+	SanitationData []StatData `json:"sanitationData"`
 }
 
-// ==========================================
-// LOG REPOSITORY
-// ==========================================
+type WasteStats struct {
+	WasteDisposalData    []StatData `json:"wasteDisposalData"`
+	WasteSegregationData []StatData `json:"wasteSegregationData"`
+	WasteTypesData       []StatData `json:"wasteTypesData"`
+}
 
-func GetLiftingLogs(db *sql.DB, stationID int, date string) ([]models.LiftingDailyLog, error) {
-	var logs = []models.LiftingDailyLog{
-		{
-			ID: 1, StationID: stationID, ShiftType: ptr("Morning"),
-			PumpStatus: ptr("Running"), HoursReading: ptr(12.5), Voltage: ptr(415.0), CurrentReading: ptr(15.2),
-			VibrationIssue: ptr(false), NoiseIssue: ptr(false), LeakageIssue: ptr(false), SumpLevelStatus: ptr("Normal"),
-			PanelStatus: ptr("Good"), CleaningDone: ptr(true), Remark: ptr("Normal Operations"), CreatedAt: time.Now(),
-		},
+func queryStats(db *sql.DB, query string) ([]StatData, error) {
+	rows, err := db.Query(query)
+	if err != nil {
+		return nil, err
 	}
-	return logs, nil
-}
+	defer rows.Close()
 
-func GetPumpingLogs(db *sql.DB, stationID int, date string) ([]models.PumpingDailyLog, error) {
-	var logs = []models.PumpingDailyLog{
-		{
-			ID: 1, StationID: stationID, ShiftType: ptr("Evening"),
-			PumpsRunningCount: ptr(2), InletLevelStatus: ptr("Normal"), OutletPressure: ptr(4.5), FlowRate: ptr(120.0),
-			Voltage: ptr(410.0), CurrentReading: ptr(45.5), PowerFactor: ptr(0.92), VibrationIssue: ptr(false), NoiseIssue: ptr(false),
-			LeakageIssue: ptr(false), PanelAlarmStatus: ptr("None"), SumpCleanliness: ptr("Clean"), ScreenBarCleaned: ptr(true),
-			Remark: ptr("Pumping stable"),
-		},
+	var res []StatData
+	for rows.Next() {
+		var name sql.NullString
+		var count float64
+		if err := rows.Scan(&name, &count); err != nil {
+			return nil, err
+		}
+		n := name.String
+		if n == "" {
+			n = "Unknown"
+		}
+		res = append(res, StatData{Name: n, Value: count})
 	}
-	return logs, nil
+	return res, nil
 }
 
-func GetSTPLogs(db *sql.DB, stationID int, date string) ([]models.STPDailyLog, error) {
-	var logs = []models.STPDailyLog{
-		{
-			ID: 1, StationID: stationID, InletFlowRate: ptr(12.5), InletPH: ptr(7.2), InletBOD: ptr(210.0),
-			OutletFlowRate: ptr(11.8), OutletPH: ptr(7.0), OutletBOD: ptr(15.0), PowerKWH: ptr(450.0), ChemicalStockStatus: ptr("Sufficient"),
-		},
-	}
-	return logs, nil
+func GetHealthSurveyStats(db *sql.DB) (*HealthStats, error) {
+	stats := &HealthStats{}
+
+	bpl, _ := queryStats(db, "SELECT bpl, count(*) FROM surveys GROUP BY bpl")
+	stats.BPLAplData = bpl
+
+	gender, _ := queryStats(db, "SELECT gender, count(*) FROM family_members GROUP BY gender")
+	stats.GenderData = gender
+
+	caste, _ := queryStats(db, "SELECT caste, count(*) FROM surveys GROUP BY caste")
+	stats.CasteData = caste
+
+	insurance, _ := queryStats(db, "SELECT insurance, count(*) FROM surveys GROUP BY insurance")
+	stats.InsuranceData = insurance
+
+	income, _ := queryStats(db, "SELECT income, count(*) FROM family_members GROUP BY income")
+	stats.IncomeData = income
+
+	sanitation, _ := queryStats(db, "SELECT toilet, count(*) FROM surveys GROUP BY toilet")
+	stats.SanitationData = sanitation
+
+	return stats, nil
 }
 
+func GetWasteSurveyStats(db *sql.DB) (*WasteStats, error) {
+	stats := &WasteStats{}
 
+	disposal, _ := queryStats(db, "SELECT waste_disposal, count(*) FROM surveys GROUP BY waste_disposal")
+	stats.WasteDisposalData = disposal
+
+	segregation, _ := queryStats(db, "SELECT waste_segregation, count(*) FROM surveys GROUP BY waste_segregation")
+	stats.WasteSegregationData = segregation
+
+	types, _ := queryStats(db, "SELECT waste_types, count(*) FROM surveys GROUP BY waste_types")
+	stats.WasteTypesData = types
+
+	return stats, nil
+}

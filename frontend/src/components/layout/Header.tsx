@@ -32,6 +32,7 @@ export function Header({ title, subtitle, children }: HeaderProps) {
         if (parsed.role === "admin") displayName = "Admin";
         else if (parsed.role === "ae1") displayName = "AE 1";
         else if (parsed.role === "ae2") displayName = "AE 2";
+        else if (parsed.role === "ae3") displayName = "AE 3";
         else displayName = parsed.username || "User";
       } else {
         displayName = userStr;

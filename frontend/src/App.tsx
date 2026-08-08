@@ -7,11 +7,6 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Overview from "./pages/Overview";
 import Citizen from "./pages/Citizen";
 import FieldTeam from "./pages/FieldTeam";
-import LiftingStations from "./pages/LiftingStations";
-import PumpingStations from "./pages/PumpingStations";
-import STP from "./pages/STP";
-import Assets from "./pages/Assets";
-import Finance from "./pages/Finance";
 import Reports from "./pages/Reports";
 
 import NotFound from "./pages/NotFound";
@@ -53,44 +48,7 @@ const App = () => (
               isLoggedIn() ? <FieldTeam /> : <Navigate to="/login" replace />
             }
           />
-          <Route
-            path="/lifting-stations"
-            element={
-              isLoggedIn() ? (
-                <LiftingStations />
-              ) : (
-                <Navigate to="/login" replace />
-              )
-            }
-          />
-          <Route
-            path="/pumping-stations"
-            element={
-              isLoggedIn() ? (
-                <PumpingStations />
-              ) : (
-                <Navigate to="/login" replace />
-              )
-            }
-          />
-          <Route
-            path="/stp"
-            element={
-              isLoggedIn() ? <STP /> : <Navigate to="/login" replace />
-            }
-          />
-          <Route
-            path="/assets"
-            element={
-              isLoggedIn() ? <Assets /> : <Navigate to="/login" replace />
-            }
-          />
-          <Route
-            path="/finance"
-            element={
-              isLoggedIn() ? <Finance /> : <Navigate to="/login" replace />
-            }
-          />
+
           <Route
             path="/reports"
             element={

@@ -1,4 +1,4 @@
-﻿// API Service for UGSS Command Center Backend
+// API Service for UGSS Command Center Backend
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8082/api';
 
 // Returns Authorization header with JWT token from localStorage
@@ -20,7 +20,8 @@ export const getUserByMobile = async (mobile: string) => {
 };
 
 export const getUsersByRole = async (role: string) => {
-  const response = await fetch(`${API_BASE_URL}/dXNlcnMvcm9sZQ?role=${role}`, { headers: getAuthHeaders() });
+  const loggedInRole = getUserRole();
+  const response = await fetch(`${API_BASE_URL}/dXNlcnMvcm9sZQ?role=${role}&userRole=${loggedInRole}`, { headers: getAuthHeaders() });
   if (!response.ok) throw new Error('Failed to fetch users');
   return response.json();
 };
@@ -29,23 +30,11 @@ export const getUsersByRole = async (role: string) => {
 // STATION API
 // ==========================================
 
-export const getAllStations = async () => {
-  const response = await fetch(`${API_BASE_URL}/c3RhdGlvbnM`, { headers: getAuthHeaders() });
-  if (!response.ok) throw new Error('Failed to fetch stations');
-  return response.json();
-};
+export const getAllStations = async () => { return []; };
 
-export const getStationsByType = async (type: string) => {
-  const response = await fetch(`${API_BASE_URL}/c3RhdGlvbnMvdHlwZQ?type=${type}`, { headers: getAuthHeaders() });
-  if (!response.ok) throw new Error('Failed to fetch stations');
-  return response.json();
-};
+export const getStationsByType = async (type: string) => { return []; };
 
-export const getEquipmentByStation = async (stationId: number) => {
-  const response = await fetch(`${API_BASE_URL}/ZXF1aXBtZW50?station_id=${stationId}`, { headers: getAuthHeaders() });
-  if (!response.ok) throw new Error('Failed to fetch equipment');
-  return response.json();
-};
+export const getEquipmentByStation = async (stationId: number) => { return []; };
 
 // ==========================================
 // COMPLAINT API
@@ -97,26 +86,13 @@ export const getWorkOrdersByStaff = async (staffId: number) => {
 // FAULT API
 // ==========================================
 
-export const getFaultsByStation = async (stationId: number) => {
-  const response = await fetch(`${API_BASE_URL}/ZmF1bHRzL3N0YXRpb24?station_id=${stationId}`, { headers: getAuthHeaders() });
-  if (!response.ok) throw new Error('Failed to fetch faults');
-  return response.json();
-};
+export const getFaultsByStation = async (stationId: number) => { return []; };
 
-export const getPendingFaults = async (date?: string) => {
-  const url = date ? `${API_BASE_URL}/ZmF1bHRzL3BlbmRpbmc?date=${date}` : `${API_BASE_URL}/ZmF1bHRzL3BlbmRpbmc`;
-  const response = await fetch(url, { headers: getAuthHeaders() });
-  if (!response.ok) throw new Error('Failed to fetch pending faults');
-  return response.json();
-};
+export const getPendingFaults = async (date?: string) => { return []; };
 
-export const getStationCounts = async () => {
-  const response = await fetch(`${API_BASE_URL}/ZGFzaGJvYXJkL3N0YXRpb24tY291bnRz`, { headers: getAuthHeaders() });
-  if (!response.ok) throw new Error('Failed to fetch station counts');
-  return response.json();
-};
+export const getStationCounts = async () => { return { total: 0, lifting: 0, pumping: 0, stp: 0 }; };
 
-function getUserRole() {
+export function getUserRole() {
   try {
     const userStr = localStorage.getItem("user");
     if (userStr && userStr.startsWith("{")) {
@@ -156,43 +132,14 @@ export const createComplaint = async (data: any) => {
   return response.json();
 };
 
-export const getLiftingLogs = async (stationId: number, date?: string) => {
-  const url = date ? `${API_BASE_URL}/bG9ncy9saWZ0aW5n?station_id=${stationId}&date=${date}` : `${API_BASE_URL}/bG9ncy9saWZ0aW5n?station_id=${stationId}`;
-  const response = await fetch(url, { headers: getAuthHeaders() });
-  if (!response.ok) throw new Error('Failed to fetch lifting logs');
-  return response.json();
-};
 
-export const getPumpingLogs = async (stationId: number, date?: string) => {
-  const url = date ? `${API_BASE_URL}/bG9ncy9wdW1waW5n?station_id=${stationId}&date=${date}` : `${API_BASE_URL}/bG9ncy9wdW1waW5n?station_id=${stationId}`;
-  const response = await fetch(url, { headers: getAuthHeaders() });
-  if (!response.ok) throw new Error('Failed to fetch pumping logs');
-  return response.json();
-};
+export const getEnergyTrend = async (date?: string) => { return []; };
 
-export const getSTPLogs = async (stationId: number, date?: string) => {
-  const url = date ? `${API_BASE_URL}/bG9ncy9zdHA?station_id=${stationId}&date=${date}` : `${API_BASE_URL}/bG9ncy9zdHA?station_id=${stationId}`;
-  const response = await fetch(url, { headers: getAuthHeaders() });
-  if (!response.ok) throw new Error('Failed to fetch STP logs');
-  return response.json();
-};
+export const getSLATrend = async (date?: string) => { return []; };
 
-export const getEnergyTrend = async (date?: string) => {
-  const url = date ? `${API_BASE_URL}/ZW5lcmd5L3RyZW5k?date=${date}` : `${API_BASE_URL}/ZW5lcmd5L3RyZW5k`;
+export const getOfficerStats = async (role?: string) => {
+  const url = role ? `${API_BASE_URL}/ZGFzaGJvYXJkL29mZmljZXItc3RhdHM?role=${role}` : `${API_BASE_URL}/ZGFzaGJvYXJkL29mZmljZXItc3RhdHM`;
   const response = await fetch(url, { headers: getAuthHeaders() });
-  if (!response.ok) throw new Error('Failed to fetch energy trend');
-  return response.json();
-};
-
-export const getSLATrend = async (date?: string) => {
-  const url = date ? `${API_BASE_URL}/c2xhL3RyZW5k?date=${date}` : `${API_BASE_URL}/c2xhL3RyZW5k`;
-  const response = await fetch(url, { headers: getAuthHeaders() });
-  if (!response.ok) throw new Error('Failed to fetch SLA trend');
-  return response.json();
-};
-
-export const getOfficerStats = async () => {
-  const response = await fetch(`${API_BASE_URL}/ZGFzaGJvYXJkL29mZmljZXItc3RhdHM`, { headers: getAuthHeaders() });
   if (!response.ok) throw new Error('Failed to fetch officer stats');
   return response.json();
 };

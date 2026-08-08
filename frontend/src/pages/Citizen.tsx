@@ -23,7 +23,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 
-import { getComplaints as fetchAllComplaints, getOfficerStats, getComplaintStats, createComplaint } from '@/services/api';
+import { getComplaints as fetchAllComplaints, getOfficerStats, getComplaintStats, createComplaint, API_BASE_URL, getUserRole } from '@/services/api';
 import {
   Select,
   SelectContent,
@@ -159,7 +159,7 @@ export default function Citizen() {
         const userStr = localStorage.getItem('user');
         if (userStr) {
           const parsed = JSON.parse(userStr);
-          const res = await fetch(`${API_BASE_URL}/officers?role=${parsed.role}`);
+          const res = await fetch(`${API_BASE_URL}/b2ZmaWNlcnM?role=${parsed.role}`);
           if (res.ok) {
             const data = await res.json();
             if (data && Array.isArray(data)) {
@@ -167,7 +167,7 @@ export default function Citizen() {
             }
           }
         } else {
-          const res = await fetch(`${API_BASE_URL}/officers?role=citizen`);
+          const res = await fetch(`${API_BASE_URL}/b2ZmaWNlcnM?role=citizen`);
           if (res.ok) {
             const data = await res.json();
             if (data && Array.isArray(data)) {
@@ -182,10 +182,11 @@ export default function Citizen() {
     fetchOfficers();
   }, []);
 
+  const [loading, setLoading] = useState(true);
   const [rawComplaints, setRawComplaints] = useState<DBComplaint[]>([]);
   const [officerStats, setOfficerStats] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
   const [allTimeStatsObj, setAllTimeStatsObj] = useState<Record<string, number>>({});
+  const [todayStatsObj, setTodayStatsObj] = useState<Record<string, number>>({});
   const [activeTab, setActiveTab] = useState('all');
   
   /* =======================
@@ -246,19 +247,22 @@ export default function Citizen() {
     const load = async () => {
       setLoading(true);
       try {
-        const [complaintsData, statsData, allTimeStats] = await Promise.all([
-          fetchAllComplaints(selectedDate),
-          getOfficerStats(),
-          getComplaintStats()
+        const [complaintsData, statsData, allTimeStats, todayStats] = await Promise.all([
+          fetchAllComplaints(),
+          getOfficerStats(getUserRole()),
+          getComplaintStats(),
+          getComplaintStats(selectedDate)
         ]);
-        setRawComplaints(complaintsData || []);
-        setOfficerStats(statsData || []);
-        setAllTimeStatsObj(allTimeStats || {});
+        setRawComplaints(Array.isArray(complaintsData) ? complaintsData : []);
+        setOfficerStats(Array.isArray(statsData) ? statsData : []);
+        setAllTimeStatsObj((allTimeStats && typeof allTimeStats === 'object' && !('error' in allTimeStats)) ? allTimeStats : {});
+        setTodayStatsObj((todayStats && typeof todayStats === 'object' && !('error' in todayStats)) ? todayStats : {});
       } catch (err) {
         console.error('Error fetching complaints/stats:', err);
         setRawComplaints([]);
         setOfficerStats([]);
         setAllTimeStatsObj({});
+        setTodayStatsObj({});
       } finally {
         setLoading(false);
       }
@@ -269,13 +273,7 @@ export default function Citizen() {
   /* ✅ Derive UI complaints from DB complaints */
   const complaints = useMemo(() => {
     let list = rawComplaints.map(deriveUIComplaint);
-    
-    // Filter complaints to valid wards
-    list = list.filter(c => {
-      const match = (c.ward_number || '').match(/\d+/);
-      const wNum = match ? parseInt(match[0], 10) : NaN;
-      return !isNaN(wNum) && wNum >= 1 && wNum <= 200;
-    });
+
 
     if (categoryParam) {
       list = list.filter(c => c.category === categoryParam);
@@ -381,10 +379,12 @@ export default function Citizen() {
     return data;
   }, [officerFilteredComplaints, activeTab]);
 
-  /* ---- KPI Counts (Filtered by Officer) ---- */
-  const totalCount = officerFilteredComplaints.length;
-  const resolvedCount = officerFilteredComplaints.filter(c => c.status === 'Resolved').length;
-  const pendingCount = officerFilteredComplaints.filter(c => c.status !== 'Resolved').length;
+  /* ---- KPI Counts (From todayStatsObj for consistency with Overview) ---- */
+  const safeTodayStats = (todayStatsObj && typeof todayStatsObj === 'object') ? todayStatsObj : {};
+  const totalCount = Object.values(safeTodayStats).reduce((acc, val) => acc + (typeof val === 'number' ? val : 0), 0);
+  const resolvedCount = typeof safeTodayStats['Resolved'] === 'number' ? safeTodayStats['Resolved'] : 0;
+  const pendingCount = Math.max(0, totalCount - resolvedCount);
+  const inProgressCount = typeof safeTodayStats['In Progress'] === 'number' ? safeTodayStats['In Progress'] : 0;
   const slaBreachedCount = officerFilteredComplaints.filter(c => c.slaBreached).length;
   const financialHoldCount = officerFilteredComplaints.filter(c => c.financialHold).length;
   const repeatCount = officerFilteredComplaints.filter(c => c.repeatComplaint).length;
@@ -461,10 +461,11 @@ export default function Citizen() {
     );
   }
 
-  const allTimeTotal = Object.values(allTimeStatsObj).reduce((a, b) => a + b, 0);
-  const allTimeResolved = allTimeStatsObj['Resolved'] || 0;
-  const allTimePending = allTimeStatsObj['Submitted'] || 0;
-  const allTimeInProgress = allTimeStatsObj['In Progress'] || 0;
+  const safeAllTimeStats = (allTimeStatsObj && typeof allTimeStatsObj === 'object') ? allTimeStatsObj : {};
+  const allTimeTotal = Object.values(safeAllTimeStats).reduce((acc, val) => acc + (typeof val === 'number' ? val : 0), 0);
+  const allTimeResolved = typeof safeAllTimeStats['Resolved'] === 'number' ? safeAllTimeStats['Resolved'] : 0;
+  const allTimePending = typeof safeAllTimeStats['Submitted'] === 'number' ? safeAllTimeStats['Submitted'] : 0;
+  const allTimeInProgress = typeof safeAllTimeStats['In Progress'] === 'number' ? safeAllTimeStats['In Progress'] : 0;
 
   return (
     <DashboardLayout 
@@ -540,7 +541,7 @@ export default function Citizen() {
         <KPICard title="Complaints Made Today" value={totalCount} icon={<Users />} onClick={() => openListModal("Today's Complaints", 'today', 'all')} />
         <KPICard title="Resolved Today" value={resolvedCount} variant="success" icon={<CheckCircle2 />} onClick={() => openListModal('Resolved Today', 'today', 'Resolved')} />
         <KPICard title="Pending Today" value={pendingCount} variant="warning" icon={<Clock />} onClick={() => openListModal('Pending Today', 'today', 'Submitted')} />
-        <KPICard title="In Progress Today" value={officerFilteredComplaints.filter(c => c.status === 'In Progress').length} variant="info" icon={<Zap />} onClick={() => openListModal('In Progress Today', 'today', 'In Progress')} />
+        <KPICard title="In Progress Today" value={inProgressCount} variant="info" icon={<Zap />} onClick={() => openListModal('In Progress Today', 'today', 'In Progress')} />
       </div>
 
       <div className="mb-6">
