@@ -1,5 +1,6 @@
 // API Service for UGSS Command Center Backend
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8082/api';
+// Set VITE_API_BASE_URL in your .env file (e.g. https://your-backend.com/api)
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8082/api';
 
 // Returns Authorization header with JWT token from localStorage
 function getAuthHeaders(): HeadersInit {

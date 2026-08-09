@@ -1,5 +1,6 @@
 export async function sendChatMessage(message: string): Promise<string> {
-  const response = await fetch("http://127.0.0.1:5000/chat", {
+  const chatbotUrl = import.meta.env.VITE_CHATBOT_URL || 'http://127.0.0.1:5000';
+  const response = await fetch(`${chatbotUrl}/chat`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
