@@ -155,6 +155,8 @@ func main() {
 		auth.GET("/api/c3VydmV5cy9oZWFsdGgtc3RhdHM=", handlers.GetHealthSurveyStatsHandler(db))
 		auth.GET("/api/c3VydmV5cy93YXN0ZS1zdGF0cw==", handlers.GetWasteSurveyStatsHandler(db))
 		auth.GET("/api/ZGFzaGJvYXJkL29mZmljZXItc3RhdHM", handlers.GetOfficerStatsHandler(db))
+		auth.GET("/api/d2FyZHM=", handlers.GetWardsHandler(db))
+		auth.GET("/api/wards", handlers.GetWardsHandler(db))
 
 		// Garbage sub-routes
 		garbage := auth.Group("/api/Z2FyYmFnZQ")

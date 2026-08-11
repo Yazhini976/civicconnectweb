@@ -14,9 +14,45 @@ import React, { useState, useEffect } from 'react';
 
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8082';
-const COLORS = ['#f59e0b', '#1d4ed8', '#e11d48', '#2563eb', '#8b5cf6', '#22c55e', '#f97316', '#06b6d4'];
+const COLORS = ['#f59e0b', '#1d4ed8', '#e11d48', '#2563eb', '#8b5cf6', '#22c55e', '#f97316', '#06b6d4', '#475569'];
 
-const addColors = (arr) => (arr || []).map((item, i) => ({ ...item, color: COLORS[i % COLORS.length] }));
+const DISPOSAL_CATEGORIES = [
+  "Municipal collection",
+  "Private collector",
+  "Community bin",
+  "Dumping in open areas",
+  "Burning",
+  "Composting",
+  "Recycling/Scrap dealer",
+  "Other"
+];
+
+const TYPE_CATEGORIES = [
+  "Sanitary Waste",
+  "Textile",
+  "Metal",
+  "Paper/Cardboard",
+  "E-Waste",
+  "Glass",
+  "Garden Waste",
+  "Food/Biodegradable",
+  "Plastic"
+];
+
+const SEGREGATION_CATEGORIES = [
+  "Always",
+  "Sometimes",
+  "Never"
+];
+
+const fillAndAddColors = (fetchedData, categories) => {
+  const dataMap = new Map((fetchedData || []).map(d => [d.name, d.value]));
+  return categories.map((cat, i) => ({
+    name: cat,
+    value: dataMap.get(cat) || 0,
+    color: COLORS[i % COLORS.length]
+  }));
+};
 
 export function SolidWasteSurvey() {
   const [data, setData] = useState({
@@ -34,9 +70,9 @@ export function SolidWasteSurvey() {
         });
         const resData = await res.json();
         setData({
-          wasteDisposalData: addColors(resData.wasteDisposalData),
-          wasteSegregationData: addColors(resData.wasteSegregationData),
-          wasteTypesData: addColors(resData.wasteTypesData)
+          wasteDisposalData: fillAndAddColors(resData.wasteDisposalData, DISPOSAL_CATEGORIES),
+          wasteSegregationData: fillAndAddColors(resData.wasteSegregationData, SEGREGATION_CATEGORIES),
+          wasteTypesData: fillAndAddColors(resData.wasteTypesData, TYPE_CATEGORIES)
         });
       } catch (err) {
         console.error('Failed to fetch waste stats:', err);
@@ -51,6 +87,7 @@ export function SolidWasteSurvey() {
 
   return (
     <div className="space-y-6">
+
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Waste Disposal Analysis - Ward-wise */}
         <div className="rounded-xl border border-border bg-card p-6 shadow-sm">

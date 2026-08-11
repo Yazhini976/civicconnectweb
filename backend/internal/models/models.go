@@ -127,6 +127,7 @@ type WorkOrder struct {
 	ID                string     `json:"id"`
 	ComplaintID       string     `json:"complaint_id"`
 	StaffID           string     `json:"staff_id"`
+	CreatedAt         *time.Time `json:"created_at"`
 	SLADeadline       *time.Time `json:"sla_deadline"`
 	WorkType          *string    `json:"work_type"`
 	ExpectedDuration  *float64   `json:"expected_duration"`
@@ -146,17 +147,7 @@ type WorkOrder struct {
 	NextAction        *string    `json:"next_action"`
 }
 
-type Escalation struct {
-	ID          string    `json:"id"`
-	ComplaintID *string   `json:"complaint_id"`
-	WorkOrderID *string   `json:"work_order_id"`
-	TriggerType *string   `json:"trigger_type"`
-	TriggerTime time.Time `json:"trigger_time"`
-	Level       *string   `json:"level"`
-	ReasonType  *string   `json:"reason_type"`
-	OfficerID   *string   `json:"officer_id"`
-	Remarks     *string   `json:"remarks"`
-}
+
 
 // ==========================================
 // FAULTS
@@ -171,9 +162,7 @@ type Fault struct {
 	FaultType           *string    `json:"fault_type"`
 	Severity            *string    `json:"severity"`
 	EmergencyShutdown   *bool      `json:"emergency_shutdown"`
-	EscalationRequired  *bool      `json:"escalation_required"`
-	EscalatedToRole     *string    `json:"escalated_to_role"`
-	EscalationReason    *string    `json:"escalation_reason"`
+
 	RectificationStatus string     `json:"rectification_status"`
 	RectifiedAt         *time.Time `json:"rectified_at"`
 	RectificationRemark *string    `json:"rectification_remark"`

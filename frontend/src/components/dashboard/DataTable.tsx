@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils';
 interface Column<T> {
   key: string;
   header: string;
-  render?: (item: T) => ReactNode;
+  render?: (item: T, index?: number) => ReactNode;
   className?: string;
 }
 
@@ -22,7 +22,8 @@ export function DataTable<T extends Record<string, any>>({
   maxHeight = '400px',
 }: DataTableProps<T>) {
   return (
-    <div className={cn('overflow-hidden rounded-xl border border-border bg-card', className)}>
+    <div className={cn('relative overflow-hidden rounded-xl border border-border bg-card shadow-sm', className)}>
+      <div className="absolute top-0 left-0 h-1 w-full bg-gradient-primary z-20"></div>
       <div className="overflow-auto scrollbar-thin" style={{ maxHeight }}>
         <table className="data-table">
           <thead className="sticky top-0 z-10">
@@ -39,7 +40,7 @@ export function DataTable<T extends Record<string, any>>({
               <tr key={idx} className="transition-colors">
                 {columns.map((col) => (
                   <td key={col.key} className={col.className}>
-                    {col.render ? col.render(item) : item[col.key]}
+                    {col.render ? col.render(item, idx) : item[col.key]}
                   </td>
                 ))}
               </tr>

@@ -1,4 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
+import { format } from 'date-fns';
+import { Calendar } from '@/components/ui/calendar';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { KPICard } from '@/components/dashboard/KPICard';
 import { DataTable } from '@/components/dashboard/DataTable';
@@ -9,6 +11,8 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { ComplaintListModal } from '@/components/ComplaintListModal';
 import { SolidWasteSurvey } from '@/components/dashboard/SolidWasteSurvey';
 import { HealthSurvey } from '@/components/dashboard/HealthSurvey';
+import { SurveyIndicators } from '@/components/dashboard/SurveyIndicators';
+import { SurveyRecords } from '@/components/dashboard/SurveyRecords';
 import { useSearchParams } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -44,6 +48,8 @@ import {
   Image,
   Mic,
   Star,
+  Calendar as CalendarIcon,
+  X,
 } from 'lucide-react';
 import {
   BarChart,
@@ -128,9 +134,15 @@ export default function Citizen() {
   const [selectedDate, setSelectedDate] = useState(
     localStorage.getItem('selectedDate') || new Date().toISOString().split('T')[0]
   );
+  const [selectedEndDate, setSelectedEndDate] = useState(
+    localStorage.getItem('selectedEndDate') || new Date().toISOString().split('T')[0]
+  );
   
   const [officers, setOfficers] = useState<{id: string, name: string}[]>([]);
   const [selectedOfficer, setSelectedOfficer] = useState<string>('all');
+  const [selectedWard, setSelectedWard] = useState<number | null>(null);
+  const [wards, setWards] = useState<any[]>([]);
+  const [showCalendar, setShowCalendar] = useState(false);
 
   const userRole = useMemo(() => {
     try {
@@ -194,10 +206,10 @@ export default function Citizen() {
      ======================= */
   const [isListModalOpen, setIsListModalOpen] = useState(false);
   const [modalTitle, setModalTitle] = useState('');
-  const [modalTimeRange, setModalTimeRange] = useState<'all-time'|'today'>('all-time');
-  const [modalStatus, setModalStatus] = useState<'all' | 'Resolved' | 'In Progress' | 'Submitted'>('all');
+  const [modalTimeRange, setModalTimeRange] = useState<'all-time' | 'today'>('today');
+  const [modalStatus, setModalStatus] = useState<'all' | 'Resolved' | 'In Progress' | 'Submitted' | 'Pending' | 'Rejected'>('all');
 
-  const openListModal = (title: string, timeRange: 'all-time'|'today', status: 'all' | 'Resolved' | 'In Progress' | 'Submitted') => {
+  const openListModal = (title: string, timeRange: 'all-time' | 'today', status: 'all' | 'Resolved' | 'In Progress' | 'Submitted' | 'Pending' | 'Rejected') => {
     setModalTitle(title);
     setModalTimeRange(timeRange);
     setModalStatus(status);
@@ -274,7 +286,6 @@ export default function Citizen() {
   const complaints = useMemo(() => {
     let list = rawComplaints.map(deriveUIComplaint);
 
-
     if (categoryParam) {
       list = list.filter(c => c.category === categoryParam);
     }
@@ -286,11 +297,36 @@ export default function Citizen() {
     return list;
   }, [rawComplaints, categoryParam, subcategoryParam]);
 
+  /* ---- Date & Ward Filtered Complaints ---- */
+  const dateAndWardFilteredComplaints = useMemo(() => {
+    let list = [...complaints];
+
+    // Filter by selectedDate (e.g. "2026-08-11")
+    if (selectedDate) {
+      list = list.filter(c => {
+        const createdDate = c.created_at ? c.created_at.split('T')[0] : '';
+        const resolvedDate = c.resolved_at ? c.resolved_at.split('T')[0] : '';
+        return createdDate === selectedDate || resolvedDate === selectedDate;
+      });
+    }
+
+    // Filter by selectedWard
+    if (selectedWard !== null && selectedWard !== undefined) {
+      list = list.filter(c => {
+        const wardStr = c.ward_number || c.location || '';
+        const match = wardStr.match(/\d+/);
+        return match ? parseInt(match[0], 10) === selectedWard : false;
+      });
+    }
+
+    return list;
+  }, [complaints, selectedDate, selectedWard]);
+
   /* ---- Officer Filtered Complaints ---- */
   const officerFilteredComplaints = useMemo(() => {
-    if (selectedOfficer === 'all') return complaints;
-    return complaints.filter(c => String(c.assigned_to) === String(selectedOfficer));
-  }, [complaints, selectedOfficer]);
+    if (selectedOfficer === 'all') return dateAndWardFilteredComplaints;
+    return dateAndWardFilteredComplaints.filter(c => String(c.assigned_to) === String(selectedOfficer));
+  }, [dateAndWardFilteredComplaints, selectedOfficer]);
 
   /* ---- Charts ---- */
   const complaintsByWard = useMemo(() => {
@@ -370,8 +406,8 @@ export default function Citizen() {
   /* ---- Tab Filter ---- */
   const filteredComplaints = useMemo(() => {
     let data = [...officerFilteredComplaints];
-    if (activeTab === 'completed') data = data.filter(c => c.status === 'Resolved');
-    if (activeTab === 'pending') data = data.filter(c => c.status !== 'Resolved');
+    if (activeTab === 'completed') data = data.filter(c => c.status === 'Resolved' || c.status === 'Completed');
+    if (activeTab === 'pending') data = data.filter(c => c.status === 'Pending' || c.status === 'Submitted');
     if (activeTab === 'breached') data = data.filter(c => c.slaBreached);
     if (activeTab === 'financial-hold') data = data.filter(c => c.financialHold);
     if (activeTab === 'escalated') data = data.filter(c => !!c.escalationLevel);
@@ -379,12 +415,11 @@ export default function Citizen() {
     return data;
   }, [officerFilteredComplaints, activeTab]);
 
-  /* ---- KPI Counts (From todayStatsObj for consistency with Overview) ---- */
-  const safeTodayStats = (todayStatsObj && typeof todayStatsObj === 'object') ? todayStatsObj : {};
-  const totalCount = Object.values(safeTodayStats).reduce((acc, val) => acc + (typeof val === 'number' ? val : 0), 0);
-  const resolvedCount = typeof safeTodayStats['Resolved'] === 'number' ? safeTodayStats['Resolved'] : 0;
-  const pendingCount = Math.max(0, totalCount - resolvedCount);
-  const inProgressCount = typeof safeTodayStats['In Progress'] === 'number' ? safeTodayStats['In Progress'] : 0;
+  /* ---- KPI Counts (Filtered by selectedDate & selectedWard) ---- */
+  const totalCount = officerFilteredComplaints.length;
+  const resolvedCount = officerFilteredComplaints.filter(c => c.status === 'Resolved' || c.status === 'Completed').length;
+  const pendingCount = officerFilteredComplaints.filter(c => c.status === 'Pending' || c.status === 'Submitted').length;
+  const inProgressCount = officerFilteredComplaints.filter(c => c.status === 'In Progress' || c.status === 'WIP').length;
   const slaBreachedCount = officerFilteredComplaints.filter(c => c.slaBreached).length;
   const financialHoldCount = officerFilteredComplaints.filter(c => c.financialHold).length;
   const repeatCount = officerFilteredComplaints.filter(c => c.repeatComplaint).length;
@@ -531,16 +566,97 @@ export default function Citizen() {
         <SolidWasteSurvey />
       ) : categoryParam === 'Survey' && subcategoryParam === 'Health' ? (
         <HealthSurvey />
+      ) : categoryParam === 'Survey' && subcategoryParam === 'Indicators' ? (
+        <SurveyIndicators />
+      ) : categoryParam === 'Survey' && subcategoryParam === 'Records' ? (
+        <SurveyRecords />
       ) : (
         <>
+          {/* System Overview Strip */}
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-4 rounded-xl bg-gradient-hero p-4 text-primary-foreground shadow-sm">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium opacity-90">Total Wards:</span>
+              <span className="font-bold text-lg">{wards.length || 42}</span>
+            </div>
+
+            {/* Filter Controls (Ward Select + Date Calendar) */}
+            <div className="flex flex-wrap items-center gap-3">
+              {/* Small Ward Select Dropdown */}
+              <div className="flex items-center gap-2 bg-white/10 px-3 py-1.5 rounded-lg border border-white/20">
+                <span className="text-xs font-medium text-white/90">Filter Ward:</span>
+                <Select 
+                  value={selectedWard === null ? 'all' : String(selectedWard)} 
+                  onValueChange={(val) => setSelectedWard(val === 'all' ? null : Number(val))}
+                >
+                  <SelectTrigger className="h-7 w-[140px] text-xs font-semibold bg-white text-slate-800 border-none">
+                    <SelectValue placeholder="All Wards" />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-60">
+                    <SelectItem value="all">All Wards ({wards.length || 42})</SelectItem>
+                    {(wards.length > 0 ? wards : Array.from({ length: 42 }, (_, i) => ({ ward_no: i + 1, ward_name: `Ward ${i + 1}` }))).map((w) => (
+                      <SelectItem key={w.ward_no} value={String(w.ward_no)}>
+                        Ward {w.ward_no}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Calendar Date Picker Button */}
+              <div className="relative">
+                <button
+                  onClick={() => setShowCalendar(!showCalendar)}
+                  className="flex items-center gap-2 bg-white text-slate-800 px-3 py-1.5 rounded-lg text-xs font-semibold hover:bg-slate-50 transition-colors shadow-sm"
+                >
+                  <CalendarIcon className="h-4 w-4 text-cyan-600" />
+                  <span>{selectedDate ? format(new Date(selectedDate), "dd MMM yyyy") : "Select Date"}</span>
+                </button>
+
+                {/* Calendar Popover */}
+                {showCalendar && (
+                  <div className="absolute right-0 top-10 rounded-xl border bg-white p-4 shadow-xl z-50 text-slate-900" style={{ minWidth: 280 }}>
+                    <div className="mb-3 flex items-center justify-between border-b pb-2">
+                      <span className="text-sm font-bold text-slate-800">
+                        {selectedDate ? format(new Date(selectedDate), "dd MMM yyyy") : "Select Date"}
+                      </span>
+                      <button
+                        onClick={() => setShowCalendar(false)}
+                        className="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition-colors"
+                        title="Close Calendar"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                    <Calendar
+                      mode="single"
+                      selected={selectedDate ? new Date(selectedDate) : new Date()}
+                      onSelect={(d) => {
+                        if (!d) return;
+                        const dateStr = format(d, "yyyy-MM-dd");
+                        setSelectedDate(dateStr);
+                        setSelectedEndDate(dateStr);
+                        localStorage.setItem("selectedDate", dateStr);
+                        localStorage.setItem("selectedEndDate", dateStr);
+                        window.dispatchEvent(new Event("storage"));
+                        setShowCalendar(false);
+                      }}
+                      disabled={{ after: new Date() }}
+                      initialFocus
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
           {/* =======================
               KPI CARDS (TODAY)
               ======================= */}
-      <h2 className="mb-4 text-xl font-bold tracking-tight">Today's Complaints</h2>
+          <h2 className="mb-4 text-xl font-bold tracking-tight">Today's Complaints</h2>
       <div className="mb-8 grid gap-4 grid-cols-2">
         <KPICard title="Complaints Made Today" value={totalCount} icon={<Users />} onClick={() => openListModal("Today's Complaints", 'today', 'all')} />
         <KPICard title="Resolved Today" value={resolvedCount} variant="success" icon={<CheckCircle2 />} onClick={() => openListModal('Resolved Today', 'today', 'Resolved')} />
-        <KPICard title="Pending Today" value={pendingCount} variant="warning" icon={<Clock />} onClick={() => openListModal('Pending Today', 'today', 'Submitted')} />
+        <KPICard title="Pending Today" value={pendingCount} variant="warning" icon={<Clock />} onClick={() => openListModal('Pending Today', 'today', 'Pending')} />
         <KPICard title="In Progress Today" value={inProgressCount} variant="info" icon={<Zap />} onClick={() => openListModal('In Progress Today', 'today', 'In Progress')} />
       </div>
 

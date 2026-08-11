@@ -2,12 +2,12 @@ package handlers
 
 import (
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -46,59 +46,41 @@ func LoginHandler(db *sql.DB) gin.HandlerFunc {
 
 		// Hybrid Login Logic: Check new schema first (for college server), fallback to app_users (for local)
 		
-		// 1. Try admin_users
-		err := db.QueryRow("SELECT password_hash FROM admin_users WHERE username = $1", req.Username).Scan(&hash)
+		// 1. Try ae_officers (by phone_number)
+		var aeID int
+		var aeName string
+		err := db.QueryRow("SELECT ae_id, password_hash, ae_name FROM ae_officers WHERE phone_number = $1", req.Username).Scan(&aeID, &hash, &aeName)
 		if err == nil {
-			role = "admin"
-			modules = []string{"Water Utility", "UGSS", "Street Lighting", "Solid Waste", "Survey"}
-		} else {
-			// 2. Try ae_officers
-			var aeID int
-			var aeName string
-			err = db.QueryRow("SELECT ae_id, password_hash, ae_name FROM ae_officers WHERE phone_number = $1 OR ae_name = $1", req.Username).Scan(&aeID, &hash, &aeName)
-			if err == nil {
-				if aeName == "AE 3" || req.Username == "ae3" {
-					role = "ae3"
-				} else if aeName == "AE 2" || req.Username == "ae2" {
-					role = "ae2"
-				} else {
-					role = "ae1"
-				}
-
-				rows, _ := db.Query("SELECT m.module_name FROM ae_module_mapping am JOIN modules m ON am.module_id = m.module_id WHERE am.ae_id = $1", aeID)
-				if rows != nil {
-					defer rows.Close()
-					for rows.Next() {
-						var mName string
-						if err := rows.Scan(&mName); err == nil {
-							modules = append(modules, mName)
-						}
-					}
-				}
-			} else {
-				// 3. Try users (Citizens)
-				err = db.QueryRow("SELECT password_hash FROM users WHERE phone_number = $1", req.Username).Scan(&hash)
-				if err == nil {
-					role = "citizen"
-					modules = []string{"Water Utility", "UGSS", "Street Lighting", "Solid Waste", "Survey"}
-				}
+			// Assign role based on ae_name from DB
+			aeName = strings.TrimSpace(aeName)
+			switch aeName {
+			case "AE 2":
+				role = "ae2"
+				modules = []string{"Solid Waste", "Survey"}
+			case "AE 3":
+				role = "ae3"
+				modules = []string{"Water Utility", "UGSS", "Street Lighting", "Solid Waste", "Survey"}
+			case "AE 4":
+				role = "ae4"
+				modules = []string{"Water Utility", "UGSS", "Street Lighting", "Solid Waste", "Survey"}
+			default:
+				role = "ae1"
+				modules = []string{"Water Utility", "UGSS", "Street Lighting"}
 			}
-		}
-
-		// Fallback to old app_users schema if hash is still empty
-		if hash == "" {
-			var modulesJSON []byte
-			err := db.QueryRow("SELECT password_hash, role, allowed_modules FROM app_users WHERE username = $1", req.Username).Scan(&hash, &role, &modulesJSON)
-			if err != nil {
+		} else {
+			// 2. Try admin_users
+			err = db.QueryRow("SELECT password_hash FROM admin_users WHERE username = $1", req.Username).Scan(&hash)
+			if err == nil {
+				role = "admin"
+				modules = []string{"Water Utility", "UGSS", "Street Lighting", "Solid Waste", "Survey"}
+			} else {
+				// No matching user found
 				c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
 				return
 			}
-			if err := json.Unmarshal(modulesJSON, &modules); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "Error parsing modules"})
-				return
-			}
 		}
 
+		// Verify password using bcrypt
 		if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(req.Password)); err != nil {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
 			return
@@ -487,5 +469,20 @@ func GetWasteSurveyStatsHandler(db *sql.DB) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, stats)
+	}
+}
+
+// ==========================================
+// WARDS HANDLER
+// ==========================================
+
+func GetWardsHandler(db *sql.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		wards, err := repository.GetWards(db)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, wards)
 	}
 }

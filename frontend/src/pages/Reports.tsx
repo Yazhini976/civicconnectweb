@@ -1,4 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
+import { useLocation } from 'react-router-dom';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import {
@@ -25,16 +28,51 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 /* ===================== DOWNLOAD HELPER ===================== */
+const PHONE_KEYS = ['phone', 'phone_number', 'mobile', 'contact', 'phonenumber'];
+const DATE_KEYS = ['date', 'created_at', 'resolved_at', 'updated_at', 'survey_date'];
+
+const formatCellValue = (key: string, value: any): string => {
+  const k = key.toLowerCase();
+  if (value === null || value === undefined) return '';
+
+  // Phone → force text in Excel using ="..."
+  if (PHONE_KEYS.some(p => k.includes(p))) {
+    return `="${String(value)}"`;
+  }
+
+  // Date → reformat YYYY-MM-DD or ISO timestamp to DD/MM/YYYY
+  if (DATE_KEYS.some(d => k.includes(d))) {
+    const str = String(value);
+    const iso = str.split('T')[0]; // handle "2026-08-01T..." too
+    const parts = iso.split('-');
+    if (parts.length === 3) return `${parts[2]}/${parts[1]}/${parts[0]}`;
+  }
+
+  return String(value);
+};
+
 const downloadCSV = (filename: string, rows: any[]) => {
   if (!rows || !rows.length) return;
 
-  const headers = Object.keys(rows[0]);
+  const allHeaders = Object.keys(rows[0]);
+  const headers = allHeaders.filter(h =>
+    h.toLowerCase() !== 'color' &&
+    h.toLowerCase() !== 'fill' &&
+    h.toLowerCase() !== 'photo_url' &&
+    h.toLowerCase() !== 'audio_url'
+  );
+
   const csv =
     headers.join(',') +
     '\n' +
     rows
       .map(row =>
-        headers.map(h => `"${row[h] ?? ''}"`).join(',')
+        headers.map(h => {
+          const formatted = formatCellValue(h, row[h]);
+          // Wrap in quotes if not already an Excel formula
+          if (formatted.startsWith('="')) return formatted;
+          return `"${formatted}"`;
+        }).join(',')
       )
       .join('\n');
 
@@ -49,196 +87,55 @@ const downloadCSV = (filename: string, rows: any[]) => {
   document.body.removeChild(link);
 };
 
-/* ===================== HIGH FIDELITY PRINT PDF ===================== */
+/* ===================== DIRECT PDF DOWNLOAD ===================== */
 const handlePrintPDF = (activeTab: string, data: any) => {
-  const printWindow = window.open('', '_blank');
-  if (!printWindow) {
-    alert('Please allow popups to download/print the PDF');
-    return;
-  }
-
-  let title = 'System Report';
-  let htmlContent = '';
-
+  const doc = new jsPDF();
+  
   if (activeTab === 'details') {
-    title = 'Complaint Details Report';
-    htmlContent = `
-      <h1>${title}</h1>
-      <p>Generated on: ${new Date().toLocaleDateString()}</p>
-      <table>
-        <thead>
-          <tr>
-            <th>Citizen Name</th>
-            <th>Category</th>
-            <th>Type</th>
-            <th>Ward</th>
-            <th>Status</th>
-            <th>Created At</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${data.complaints.map((c: any) => `
-            <tr>
-              <td>${c.citizen_name || 'Anonymous'}</td>
-              <td>${c.category || '-'}</td>
-              <td>${c.type || '-'}</td>
-              <td>${c.ward_number || '-'}</td>
-              <td>${c.status || '-'}</td>
-              <td>${new Date(c.created_at).toLocaleDateString()}</td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
-    `;
+    doc.setFontSize(16);
+    doc.text('Complaint Details Report', 14, 15);
+    doc.setFontSize(10);
+    doc.setTextColor(100);
+    doc.text(`Generated on: ${new Date().toLocaleDateString()}`, 14, 22);
+    
+    autoTable(doc, {
+      startY: 28,
+      head: [['Citizen Name', 'Category', 'Type', 'Ward', 'Status', 'Created At']],
+      body: data.complaints.map((c: any) => [
+        c.citizen_name || 'Anonymous',
+        c.category || '-',
+        c.type || '-',
+        c.ward_number || '-',
+        c.status || '-',
+        c.created_at ? new Date(c.created_at).toLocaleDateString() : '-'
+      ]),
+      headStyles: { fillColor: [30, 58, 138] },
+      alternateRowStyles: { fillColor: [248, 250, 252] },
+    });
+    doc.save('complaints_report.pdf');
+    
   } else if (activeTab === 'officers') {
-    title = 'Field Officers Performance Report';
-    htmlContent = `
-      <h1>${title}</h1>
-      <p>Generated on: ${new Date().toLocaleDateString()}</p>
-      <table>
-        <thead>
-          <tr>
-            <th>Officer Name</th>
-            <th>Assigned Cases</th>
-            <th>Resolved</th>
-            <th>Not Resolved</th>
-            <th>Performance Score</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${data.processedOfficers.map((o: any) => `
-            <tr>
-              <td>${o.name}</td>
-              <td>${o.totalAssigned}</td>
-              <td>${o.resolved}</td>
-              <td>${o.notResolved}</td>
-              <td>${o.score}%</td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
-    `;
-  } else if (activeTab === 'team') {
-    title = 'Team Performance Ranking';
-    htmlContent = `
-      <h1>${title}</h1>
-      <p>Generated on: ${new Date().toLocaleDateString()}</p>
-      <table>
-        <thead>
-          <tr>
-            <th>Team Name</th>
-            <th>Resolved Cases</th>
-            <th>Performance Score</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${data.teamRanking.map((t: any) => `
-            <tr>
-              <td>${t.name}</td>
-              <td>${t.resolved}</td>
-              <td>${t.score}%</td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
-    `;
-  } else {
-    title = 'Citizen Satisfaction Ratings Report';
-    htmlContent = `
-      <h1>${title}</h1>
-      <p>Generated on: ${new Date().toLocaleDateString()}</p>
-      <table>
-        <thead>
-          <tr>
-            <th>Rating</th>
-            <th>Response Count</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${data.satisfactionData.map((s: any) => `
-            <tr>
-              <td>${s.rating}</td>
-              <td>${s.count}</td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
-    `;
+    doc.setFontSize(16);
+    doc.text('Officer Performance Report', 14, 15);
+    doc.setFontSize(10);
+    doc.setTextColor(100);
+    doc.text(`Generated on: ${new Date().toLocaleDateString()}`, 14, 22);
+    
+    autoTable(doc, {
+      startY: 28,
+      head: [['Officer Name', 'Assigned', 'Resolved', 'Avg Resolve Time']],
+      body: data.processedOfficers.map((o: any) => [
+        o.name || 'Unassigned',
+        o.totalAssigned,
+        o.resolved,
+        o.avg_time
+      ]),
+      headStyles: { fillColor: [30, 58, 138] },
+      alternateRowStyles: { fillColor: [248, 250, 252] },
+    });
+    doc.save('officers_report.pdf');
+    doc.save('officers_report.pdf');
   }
-
-  printWindow.document.write(`
-    <html>
-      <head>
-        <title>${title}</title>
-        <style>
-          body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            color: #333;
-            padding: 40px;
-            line-height: 1.5;
-          }
-          h1 {
-            font-size: 24px;
-            color: #1e3a8a;
-            margin-bottom: 5px;
-            border-bottom: 2px solid #e5e7eb;
-            padding-bottom: 10px;
-          }
-          h2 {
-            font-size: 18px;
-            color: #1e293b;
-            margin-top: 30px;
-            margin-bottom: 10px;
-          }
-          p {
-            font-size: 12px;
-            color: #64748b;
-            margin-bottom: 30px;
-          }
-          table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-bottom: 30px;
-            font-size: 13px;
-          }
-          th {
-            background-color: #f8fafc;
-            color: #475569;
-            font-weight: 600;
-            text-align: left;
-            padding: 10px;
-            border-bottom: 2px solid #e2e8f0;
-          }
-          td {
-            padding: 10px;
-            border-bottom: 1px solid #f1f5f9;
-            color: #334155;
-          }
-          tr:nth-child(even) {
-            background-color: #f8fafc;
-          }
-          @media print {
-            body {
-              padding: 0;
-            }
-            tr {
-              page-break-inside: avoid;
-            }
-          }
-        </style>
-      </head>
-      <body>
-        ${htmlContent}
-        <script>
-          window.onload = function() {
-            window.print();
-            setTimeout(function() { window.close(); }, 500);
-          };
-        </script>
-      </body>
-    </html>
-  `);
-  printWindow.document.close();
 };
 
 /* ======================================================= */
@@ -257,17 +154,19 @@ export default function Reports() {
   const [stations, setStations] = useState<any[]>([]);
   const [officerStats, setOfficerStats] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('team');
+  
+  const location = useLocation();
+  const currentHash = location.hash.replace('#', '') || 'details';
 
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
       try {
         const [cData, woData, sData, statsData] = await Promise.all([
-          getComplaints(),
-          getWorkOrders(),
-          getAllStations(),
-          getOfficerStats()
+          getComplaints().catch(() => []),
+          getWorkOrders().catch(() => []),
+          getAllStations().catch(() => []),
+          getOfficerStats().catch(() => [])
         ]);
         setComplaints(cData || []);
         setWorkOrders(woData || []);
@@ -299,82 +198,46 @@ export default function Reports() {
 
     return Object.values(staffMap).map(s => ({
       name: s.name,
-      score: s.assigned > 0 ? Math.round((s.resolved / s.assigned) * 100) : 0,
+      assigned: s.assigned,
       resolved: s.resolved,
-    })).sort((a, b) => b.score - a.score).slice(0, 10);
+    })).sort((a, b) => b.assigned - a.assigned).slice(0, 10);
   }, [workOrders]);
 
-  // 2. Satisfaction
-  const satisfactionData = [
-    { rating: 'Good', count: Math.floor(complaints.length * 0.5), color: 'hsl(150, 60%, 45%)' },
-    { rating: 'Average', count: Math.floor(complaints.length * 0.3), color: 'hsl(38, 95%, 55%)' },
-    { rating: 'Bad', count: Math.floor(complaints.length * 0.2), color: 'hsl(0, 75%, 55%)' },
-  ];
 
   const processedOfficers = useMemo(() => {
     return officerStats.map(o => {
       const totalAssigned = o.total_assigned || 0;
       const resolvedCount = o.resolved || 0;
       const notResolved = totalAssigned - resolvedCount;
-      const score = totalAssigned > 0 ? Math.round((resolvedCount / totalAssigned) * 100) : 100;
       return {
         id: o.id,
         name: o.name,
         totalAssigned,
         resolved: resolvedCount,
         notResolved,
-        score
       };
-    }).sort((a, b) => b.score - a.score);
+    }).sort((a, b) => b.totalAssigned - a.totalAssigned);
   }, [officerStats]);
 
   /* ========== DOWNLOAD ACTIVE REPORT ========= */
-  const handleDownloadActiveReport = () => {
-    switch (activeTab) {
-      case 'team':
-        downloadCSV('team_performance.csv', teamRanking);
-        break;
-      case 'satisfaction':
-        downloadCSV('citizen_satisfaction.csv', satisfactionData);
-        break;
-      case 'details':
-        downloadCSV('complaints_detailed.csv', complaints);
-        break;
-      case 'officers':
-        downloadCSV('officer_performance_details.csv', processedOfficers);
-        break;
-      default:
-        break;
-    }
-  };
+
   /* ======================================== */
 
   if (loading) return <DashboardLayout title="Reports">Loading...</DashboardLayout>;
 
   return (
-    <DashboardLayout
-      title="Reports & Analytics"
-      subtitle="Comprehensive system analytics and insights"
-    >
+    <DashboardLayout title="Reports">
       {/* Download Reports Button */}
       <div className="mb-6 flex justify-end gap-3">
-        <button
-          type="button"
-          onClick={handleDownloadActiveReport}
-          className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:bg-primary/90 animate-fade-in"
+        <button 
+          onClick={() => downloadCSV(`${currentHash}_report.csv`, currentHash === 'details' ? complaints : processedOfficers)}
+          className="flex items-center gap-2 rounded-md bg-secondary px-4 py-2 text-sm font-medium text-secondary-foreground hover:bg-secondary/80"
         >
-          ⬇ Download CSV (Active Tab)
+          Download CSV
         </button>
-
-        <button
-          type="button"
-          onClick={() => handlePrintPDF(activeTab, {
-            complaints,
-            teamRanking,
-            processedOfficers,
-            satisfactionData
-          })}
-          className="rounded-lg bg-success px-4 py-2 text-sm font-medium text-white hover:bg-success/90 animate-fade-in"
+        <button 
+          onClick={() => handlePrintPDF(currentHash, { complaints, processedOfficers, teamRanking })}
+          className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
         >
           ⬇ Download PDF (Active Tab)
         </button>
@@ -382,101 +245,16 @@ export default function Reports() {
 
 
       <div id="reports-content">
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="mb-6 flex-wrap">
-            <TabsTrigger value="team">Team Performance</TabsTrigger>
-            <TabsTrigger value="satisfaction">Citizen Satisfaction</TabsTrigger>
-            <TabsTrigger value="details">Complaint Details</TabsTrigger>
-            <TabsTrigger value="officers">Officer Performance</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="team">
-            <div className="grid gap-6 lg:grid-cols-2">
-              <div className="chart-container">
-                <h4 className="mb-4 font-semibold">Team Performance Ranking</h4>
-                <ResponsiveContainer width="100%" height={400}>
-                  <BarChart data={teamRanking} layout="vertical">
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                    <XAxis type="number" tick={{ fontSize: 12 }} domain={[0, 100]} />
-                    <YAxis type="category" dataKey="name" tick={{ fontSize: 12 }} width={100} />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: 'hsl(var(--card))',
-                        border: '1px solid hsl(var(--border))',
-                        borderRadius: '8px',
-                      }}
-                    />
-                    <Legend />
-                    <Bar dataKey="score" name="Score" fill="hsl(var(--chart-1))" radius={[0, 4, 4, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-
-              <div className="chart-container">
-                <h4 className="mb-4 font-semibold">Complaints Resolved by Team</h4>
-                <ResponsiveContainer width="100%" height={400}>
-                  <BarChart data={teamRanking}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                    <XAxis dataKey="name" tick={{ fontSize: 10 }} angle={-45} textAnchor="end" height={80} />
-                    <YAxis tick={{ fontSize: 12 }} />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: 'hsl(var(--card))',
-                        border: '1px solid hsl(var(--border))',
-                        borderRadius: '8px',
-                      }}
-                    />
-                    <Bar dataKey="resolved" name="Resolved" fill="hsl(var(--success))" radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-          </TabsContent>
-
-          <TabsContent value="satisfaction">
-            <div className="grid gap-6 lg:grid-cols-2">
-              <div className="chart-container">
-                <h4 className="mb-4 font-semibold">Citizen Satisfaction Ratings</h4>
-                <ResponsiveContainer width="100%" height={350}>
-                  <BarChart data={satisfactionData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                    <XAxis dataKey="rating" tick={{ fontSize: 12 }} />
-                    <YAxis tick={{ fontSize: 12 }} />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: 'hsl(var(--card))',
-                        border: '1px solid hsl(var(--border))',
-                        borderRadius: '8px',
-                      }}
-                    />
-                    <Bar dataKey="count" name="Responses" radius={[4, 4, 0, 0]}>
-                      {satisfactionData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-
-              <div className="chart-container">
-                <h4 className="mb-4 font-semibold">Rating Distribution</h4>
-                <ResponsiveContainer width="100%" height={350}>
-                  <StandardPieChart
-                    data={satisfactionData.filter((s) => s.count > 0)}
-                    dataKey="count"
-                    nameKey="rating"
-                    colors={satisfactionData.filter((s) => s.count > 0).map(s => s.color)}
-                    tooltipFormatter={(value: number) => `${value} Responses`}
-                  />
-                </ResponsiveContainer>
-              </div>
-            </div>
-          </TabsContent>
-
+        <Tabs value={currentHash}>
           <TabsContent value="details">
             <div className="chart-container">
               <h4 className="mb-4 font-semibold">Complaint Details Report</h4>
               <DataTable data={complaints} columns={[
+                {
+                  key: 'serial',
+                  header: 'S.No',
+                  render: (_c: any, index?: number) => <span className="font-mono text-xs text-slate-500">{(index ?? 0) + 1}</span>
+                },
                 { key: 'citizen_name', header: 'Citizen Name' },
                 { key: 'category', header: 'Category' },
                 { key: 'type', header: 'Type' },
@@ -497,19 +275,12 @@ export default function Reports() {
 
           <TabsContent value="officers">
             <div className="chart-container">
-              <h4 className="mb-4 font-semibold">Field Officers Performance Details</h4>
+              <h4 className="mb-4 font-semibold">Field Officers Details</h4>
               <DataTable data={processedOfficers} columns={[
                 { key: 'name', header: 'Officer Name' },
                 { key: 'totalAssigned', header: 'Assigned Cases' },
                 { key: 'resolved', header: 'Resolved' },
-                { key: 'notResolved', header: 'Not Resolved' },
-                { 
-                  key: 'score', 
-                  header: 'Performance Score',
-                  render: (o: any) => (
-                    <span className="font-bold text-sm text-primary">{o.score}%</span>
-                  )
-                }
+                { key: 'notResolved', header: 'Not Resolved' }
               ]} maxHeight="400px" />
             </div>
           </TabsContent>

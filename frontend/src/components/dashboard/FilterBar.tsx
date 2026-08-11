@@ -37,7 +37,7 @@ export function FilterBar({
   showStatus = true,
   showSLA = false,
   showStation = false,
-  statusOptions = ['All', 'Submitted', 'Assigned', 'In Progress', 'Resolved'],
+  statusOptions = ['All', 'Pending', 'In Progress', 'Resolved', 'Rejected'],
 }: FilterBarProps) {
   const activeFilterCount = Object.values(filters).filter((v) => v && v !== 'all').length;
 

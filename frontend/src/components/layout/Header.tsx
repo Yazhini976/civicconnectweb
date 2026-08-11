@@ -1,14 +1,11 @@
-import { useState, useEffect } from "react";
-import { Bell, Search, User, Calendar as CalendarIcon, LogOut } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Calendar as CalendarIcon, LogOut, X } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { format } from "date-fns";
 
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import { Calendar } from "@/components/ui/calendar";
 import { AssignOfficerModal } from "@/components/AssignOfficerModal";
-import { getComplaints } from "@/services/api";
 
 interface HeaderProps {
   title: string;
@@ -19,27 +16,20 @@ interface HeaderProps {
 export function Header({ title, subtitle, children }: HeaderProps) {
   const navigate = useNavigate();
   const location = useLocation();
+  const profileRef = useRef<HTMLDivElement>(null);
 
   // logged in user
-  let displayName = "User";
+  let userPhone = "";
   let userRole = "";
   try {
     const userStr = localStorage.getItem("user");
-    if (userStr) {
-      if (userStr.startsWith("{")) {
-        const parsed = JSON.parse(userStr);
-        userRole = parsed.role;
-        if (parsed.role === "admin") displayName = "Admin";
-        else if (parsed.role === "ae1") displayName = "AE 1";
-        else if (parsed.role === "ae2") displayName = "AE 2";
-        else if (parsed.role === "ae3") displayName = "AE 3";
-        else displayName = parsed.username || "User";
-      } else {
-        displayName = userStr;
-      }
+    if (userStr && userStr.startsWith("{")) {
+      const parsed = JSON.parse(userStr);
+      userRole = (parsed.role || "").toLowerCase();
+      userPhone = parsed.username || "";
     }
   } catch (e) {
-    displayName = "User";
+    userPhone = "";
   }
 
   // calendar
@@ -47,42 +37,41 @@ export function Header({ title, subtitle, children }: HeaderProps) {
     localStorage.getItem("selectedDate") ? new Date(localStorage.getItem("selectedDate")!) : new Date()
   );
   const [showCalendar, setShowCalendar] = useState(false);
-  const [notifications, setNotifications] = useState<any[]>([]);
-
-  useEffect(() => {
-    const fetchNotifications = async () => {
-      try {
-        const dateStr = selectedDate ? format(selectedDate, "yyyy-MM-dd") : format(new Date(), "yyyy-MM-dd");
-        const data = await getComplaints(dateStr);
-        if (data && Array.isArray(data)) {
-          // Sort by latest and take top 5
-          const sorted = data.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-          setNotifications(sorted.slice(0, 5));
-        }
-      } catch (err) {
-        console.error("Failed to fetch notifications", err);
-      }
-    };
-    fetchNotifications();
-  }, [selectedDate]);
-
-  const handleDateSelect = (date: Date | undefined) => {
-    setSelectedDate(date);
-    if (date) {
-      const dateStr = format(date, "yyyy-MM-dd");
-      localStorage.setItem("selectedDate", dateStr);
-      // Dispatch a storage event so other components (like Overview) can listen
-      window.dispatchEvent(new Event("storage"));
-    }
-  };
-
-  // dropdowns
-  const [showNotifications, setShowNotifications] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showAssignModal, setShowAssignModal] = useState(false);
 
+  // Close profile dropdown on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (profileRef.current && !profileRef.current.contains(e.target as Node)) {
+        setShowProfile(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const handleDateSelect = (date: Date | undefined) => {
+    if (!date) return;
+    const today = new Date();
+    today.setHours(23, 59, 59, 999);
+    if (date > today) return;
+    setSelectedDate(date);
+    const dateStr = format(date, "yyyy-MM-dd");
+    localStorage.setItem("selectedDate", dateStr);
+    localStorage.setItem("selectedEndDate", dateStr);
+    window.dispatchEvent(new Event("storage"));
+    setShowCalendar(false);
+  };
+
   const handleLogout = () => {
     localStorage.removeItem("user");
+    localStorage.removeItem("user_role");
+    localStorage.removeItem("user_name");
+    localStorage.removeItem("auth_token");
+    localStorage.removeItem("token");
+    localStorage.removeItem("selectedDate");
+    localStorage.removeItem("selectedEndDate");
     navigate("/login");
   };
 
@@ -100,122 +89,47 @@ export function Header({ title, subtitle, children }: HeaderProps) {
       </div>
 
       {/* RIGHT */}
-      <div className="relative flex items-center gap-4">
+      <div className="flex items-center gap-3">
 
-        {(userRole === 'ae1' || userRole === 'ae2') && location.pathname === '/' && (
+        {(userRole === 'ae1' || userRole === 'ae2') && (
           <Button 
             variant="default"
+            size="sm"
             onClick={() => setShowAssignModal(true)}
-            className="bg-cyan-600 hover:bg-cyan-700 text-white shadow-sm"
+            className="bg-cyan-600 hover:bg-cyan-700 text-white shadow-sm text-xs font-semibold h-9 px-3.5"
           >
             Create Officer
           </Button>
         )}
 
-        {/* Calendar */}
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => {
-            setShowCalendar(!showCalendar);
-            setShowNotifications(false);
-            setShowProfile(false);
-          }}
-        >
-          <CalendarIcon className="h-5 w-5" />
-        </Button>
+        {/* Profile Avatar with dropdown */}
+        <div className="relative" ref={profileRef}>
+          <button
+            onClick={() => setShowProfile(p => !p)}
+            className="flex items-center justify-center h-9 w-9 rounded-full bg-blue-600 text-white font-bold text-sm shadow-sm hover:bg-blue-700 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2"
+            title="Profile"
+          >
+            A
+          </button>
 
-        {/* Notifications */}
-        <Button
-          variant="ghost"
-          size="icon"
-          className="relative"
-          onClick={() => {
-            setShowNotifications(!showNotifications);
-            setShowCalendar(false);
-            setShowProfile(false);
-          }}
-        >
-          <Bell className="h-5 w-5" />
-          {notifications.length > 0 && (
-            <Badge className="absolute -right-1 -top-1 h-5 w-5 rounded-full p-0 text-xs flex items-center justify-center">
-              {notifications.length}
-            </Badge>
+          {showProfile && (
+            <div className="absolute right-0 top-11 z-50 min-w-[170px] rounded-xl border border-border bg-background shadow-lg py-3 px-4 flex flex-col gap-1">
+              <p className="text-sm font-bold text-foreground">Admin</p>
+              <p className="text-[11px] text-muted-foreground">{userPhone || "—"}</p>
+            </div>
           )}
-        </Button>
+        </div>
 
-        {/* Profile */}
+        {/* Logout Button */}
         <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => {
-            setShowProfile(!showProfile);
-            setShowCalendar(false);
-            setShowNotifications(false);
-          }}
+          variant="outline"
+          size="sm"
+          onClick={handleLogout}
+          className="flex items-center gap-2 border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 text-xs font-semibold h-9 px-3.5 transition-colors"
         >
-          <User className="h-5 w-5" />
+          <LogOut className="h-3.5 w-3.5" />
+          Logout
         </Button>
-
-        {/* Calendar Popup */}
-        {showCalendar && (
-          <div className="absolute right-32 top-14 rounded-lg border bg-white p-3 shadow-lg">
-            <p className="mb-2 text-sm font-medium">
-              {selectedDate ? format(selectedDate, "dd MMM yyyy") : "Select date"}
-            </p>
-            <Calendar
-              mode="single"
-              selected={selectedDate}
-              onSelect={handleDateSelect}
-              initialFocus
-            />
-          </div>
-        )}
-
-        {/* Notifications Popup */}
-        {showNotifications && (
-          <div className="absolute right-16 top-14 w-72 rounded-lg border bg-white p-4 shadow-lg max-h-[400px] overflow-y-auto">
-            <h3 className="mb-2 font-semibold">Notifications</h3>
-            {notifications.length === 0 ? (
-              <p className="text-sm text-gray-500">No new notifications</p>
-            ) : (
-              <ul className="space-y-3 text-sm">
-                {notifications.map((notif, idx) => (
-                  <li key={idx} className="border-b pb-2 last:border-0 last:pb-0">
-                    <div className="flex items-start gap-2">
-                      <span className="mt-0.5">
-                        {notif.status === 'Resolved' ? '✅' : notif.status === 'PENDING' ? '🚨' : '⚡'}
-                      </span>
-                      <div>
-                        <p className="font-medium text-gray-800">
-                          {notif.status === 'Resolved' ? 'Issue resolved' : notif.status === 'PENDING' ? 'New complaint received' : 'Complaint updated'}
-                        </p>
-                        <p className="text-xs text-gray-500">{notif.category} - {notif.type}</p>
-                      </div>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        )}
-
-        {/* Profile Popup */}
-        {showProfile && (
-          <div className="absolute right-0 top-14 w-56 rounded-lg border bg-white p-4 shadow-lg">
-            <p className="mb-2 text-sm text-muted-foreground">Logged in as</p>
-            <p className="mb-4 font-semibold">{displayName}</p>
-
-            <Button
-              variant="destructive"
-              className="w-full flex items-center gap-2"
-              onClick={handleLogout}
-            >
-              <LogOut className="h-4 w-4" />
-              Logout
-            </Button>
-          </div>
-        )}
       </div>
     </header>
 

@@ -3,55 +3,80 @@ import { X } from 'lucide-react';
 import { DataTable } from '@/components/dashboard/DataTable';
 import { DBComplaint } from '@/types';
 import { getComplaints } from '@/services/api';
+import { StatusBadge } from '@/components/dashboard/StatusBadge';
 
 interface ComplaintListModalProps {
   isOpen: boolean;
   onClose: () => void;
   title: string;
-  timeRange: 'all-time' | 'today';
+  timeRange?: 'all-time' | 'today';
   selectedDate?: string;
-  statusFilter?: 'all' | 'Resolved' | 'In Progress' | 'Submitted';
+  statusFilter?: 'all' | 'Resolved' | 'In Progress' | 'Submitted' | 'Pending' | 'Rejected';
+  complaintsList?: any[];
 }
 
-export function ComplaintListModal({ isOpen, onClose, title, timeRange, selectedDate, statusFilter = 'all' }: ComplaintListModalProps) {
+export function ComplaintListModal({ isOpen, onClose, title, timeRange, selectedDate, statusFilter = 'all', complaintsList }: ComplaintListModalProps) {
   const [loading, setLoading] = useState(false);
   const [complaints, setComplaints] = useState<DBComplaint[]>([]);
 
   useEffect(() => {
     if (!isOpen) return;
 
+    const applyStatusFilter = (list: DBComplaint[]) => {
+      if (!statusFilter || statusFilter === 'all') return list;
+      return list.filter(c => {
+        const s = (c.status || '').toUpperCase();
+        if (statusFilter === 'Resolved') return s === 'RESOLVED' || s === 'COMPLETED' || s === 'ACCEPTED';
+        if (statusFilter === 'Pending' || statusFilter === 'Submitted')
+          return s === 'SUBMITTED' || s === 'PENDING' || s === 'ASSIGNED' || s === 'STANDBY';
+        if (statusFilter === 'In Progress') return s === 'IN PROGRESS' || s === 'IN_PROGRESS' || s === 'WIP' || s === 'RUNNING';
+        if (statusFilter === 'Rejected') return s === 'REJECTED' || s === 'FAULT' || s === 'POOR';
+        // fallback: case-insensitive match
+        return s === statusFilter.toUpperCase();
+      });
+    };
+
+    if (complaintsList && Array.isArray(complaintsList)) {
+      setComplaints(applyStatusFilter(complaintsList));
+      return;
+    }
+
     const fetchComplaints = async () => {
       setLoading(true);
       try {
-        // If timeRange is 'today', we pass the selectedDate to get only today's complaints.
-        // If 'all-time', we pass undefined to fetch everything.
-        const data = await getComplaints(timeRange === 'today' ? selectedDate : undefined);
-        let filtered = data || [];
-        
-        if (statusFilter !== 'all') {
-          filtered = filtered.filter(c => c.status === statusFilter);
-        }
-        
-        setComplaints(filtered);
+        // Always fetch with date when provided (for 'today' filter)
+        // For 'all-time', fetch without date to get all records
+        const fetchDate = timeRange === 'today' ? selectedDate : undefined;
+        const data = await getComplaints(fetchDate);
+        setComplaints(applyStatusFilter(data || []));
       } catch (err) {
         console.error('Failed to fetch complaints for modal', err);
+        setComplaints([]);
       } finally {
         setLoading(false);
       }
     };
 
     fetchComplaints();
-  }, [isOpen, timeRange, selectedDate, statusFilter]);
+  }, [isOpen, timeRange, selectedDate, statusFilter, complaintsList]);
 
   if (!isOpen) return null;
 
   const columns = [
     {
-      key: 'id',
-      header: 'ID',
+      key: 'serial',
+      header: 'S.No',
+      render: (_c: any, index?: number) => (
+        <span className="font-mono text-xs text-slate-500">{(index ?? 0) + 1}</span>
+      ),
+    },
+    {
+      key: 'created_at',
+      header: 'Timestamp',
       render: (c: any) => (
-        <span className="font-mono text-xs block truncate max-w-[80px]" title={c.id}>
-          {c.id.slice(0, 8)}...
+        <span className="text-xs text-slate-600">
+          {new Date(c.created_at).toLocaleDateString()}{' '}
+          {new Date(c.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
         </span>
       ),
     },
@@ -63,15 +88,7 @@ export function ComplaintListModal({ isOpen, onClose, title, timeRange, selected
     {
       key: 'status',
       header: 'Status',
-      render: (c: any) => (
-        <span className={`inline-flex items-center rounded-md px-2.5 py-0.5 text-xs font-semibold ${
-          c.status === 'Resolved' ? 'bg-green-100 text-green-800' :
-          c.status === 'Pending' ? 'bg-yellow-100 text-yellow-800' :
-          'bg-blue-100 text-blue-800'
-        }`}>
-          {c.status || 'Submitted'}
-        </span>
-      ),
+      render: (c: any) => <StatusBadge status={c.status} />,
     },
     {
       key: 'created_at',
@@ -99,7 +116,15 @@ export function ComplaintListModal({ isOpen, onClose, title, timeRange, selected
         
         <div className="flex-1 overflow-auto p-6">
           {loading ? (
-            <div className="flex h-32 items-center justify-center text-slate-500">Loading complaints...</div>
+            <div className="flex h-32 items-center justify-center gap-2 text-slate-500">
+              <div className="h-5 w-5 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" />
+              Loading complaints...
+            </div>
+          ) : complaints.length === 0 ? (
+            <div className="flex h-32 flex-col items-center justify-center text-slate-400">
+              <span className="text-4xl mb-2">📋</span>
+              <span className="text-sm font-medium">No complaints found</span>
+            </div>
           ) : (
             <DataTable 
               columns={columns} 

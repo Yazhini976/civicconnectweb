@@ -24,7 +24,7 @@ const App = () => (
     <TooltipProvider>
       <Toaster />
       <Sonner />
-      <BrowserRouter basename="/civicconnectweb">
+      <BrowserRouter>
         <Routes>
           {/* 🔓 LOGIN PAGE */}
           <Route path="/login" element={<Login />} />

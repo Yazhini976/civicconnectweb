@@ -3,7 +3,7 @@ import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { KPICard } from '@/components/dashboard/KPICard';
 import { DataTable } from '@/components/dashboard/DataTable';
 import { StatusBadge } from '@/components/dashboard/StatusBadge';
-import { GaugeChart } from '@/components/dashboard/GaugeChart';
+import { GenericListModal } from '@/components/GenericListModal';
 import { getUsersByRole, getWorkOrders } from '@/services/api';
 import {
   HardHat,
@@ -44,25 +44,23 @@ export default function FieldTeam() {
   }, []);
 
   const [officers, setOfficers] = useState<any[]>([]);
+  const [modalState, setModalState] = useState<{ isOpen: boolean; type: 'officers' | 'assigned' | 'pending' | null }>({
+    isOpen: false,
+    type: null,
+  });
   const [workOrders, setWorkOrders] = useState<any[]>([]);
   const [selectedOfficer, setSelectedOfficer] = useState<string>('all');
   const [loading, setLoading] = useState(true);
 
-  // Officer name mapping for a professional look
-  const OFFICER_NAMES: Record<string, string> = {
-    'da0be945-6d0b-4733-99eb-2eeace7d7f68': 'Field Officer 1',
-    'a69651a7-c2a2-48bc-9df2-025ec007cb56': 'Field Officer 2',
-    'aa1ebc25-5b07-4145-9687-56cfe92228e8': 'Field Officer 3',
-    'a7f9568c-3e6f-4763-87dc-3b6fd5660cc6': 'Field Officer 4',
-  };
+
 
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
       try {
         const [staffData, workOrdersData] = await Promise.all([
-          getUsersByRole('FIELD_OFFICER'),
-          getWorkOrders()
+          getUsersByRole('FIELD_OFFICER').catch(() => []),
+          getWorkOrders().catch(() => [])
         ]);
         
         setWorkOrders(workOrdersData || []);
@@ -85,38 +83,36 @@ export default function FieldTeam() {
             ? Math.round((compliantCount / completed) * 100)
             : 100;
 
-          // Swap resolved and open counts so the majority is shown as Resolved (matching user intent for high field efficiency)
-          const resolvedCountVal = open;
-          const openCountVal = completed;
-
-          // Score calculation: Based on how many cases the officer resolved (resolvedCountVal) out of total assigned
-          const score = totalAssigned > 0 ? Math.round((resolvedCountVal / totalAssigned) * 100) : 100;
+          // Dynamic average resolution time
+          let avgResStr = '-';
+          const resolvedWOs = staffWOs.filter((wo: any) => wo.resolved_at && wo.created_at);
+          if (resolvedWOs.length > 0) {
+            const totalHours = resolvedWOs.reduce((sum: number, wo: any) => {
+              const diff = new Date(wo.resolved_at).getTime() - new Date(wo.created_at).getTime();
+              return sum + (diff / (1000 * 60 * 60));
+            }, 0);
+            avgResStr = (totalHours / resolvedWOs.length).toFixed(1) + 'h';
+          }
 
           return {
             id: staff.id,
-            name: OFFICER_NAMES[staff.id] || staff.full_name || staff.username,
+            name: staff.full_name || staff.username || 'Unknown',
             designation: 'Field Officer',
-            status: 'Active', // Default
-            currentWard: staff.ward_number || (
-              staff.id === 'da0be945-6d0b-4733-99eb-2eeace7d7f68' ? '1-10' :
-                staff.id === 'a69651a7-c2a2-48bc-9df2-025ec007cb56' ? '11-20' :
-                  staff.id === 'aa1ebc25-5b07-4145-9687-56cfe92228e8' ? '21-30' :
-                    staff.id === 'a7f9568c-3e6f-4763-87dc-3b6fd5660cc6' ? '31-42' : 'N/A'
-            ),
-            phone: staff.mobile_number,
+            status: 'Active', 
+            currentWard: staff.ward_number || 'Unassigned',
+            phone: staff.mobile_number || staff.username || '-',
+            username: staff.username || '',
+            mobile_number: staff.mobile_number || '',
             totalAssigned,
-            resolvedCount: resolvedCountVal,
-            openComplaints: openCountVal, // Using open complaints as proxy for open work orders
+            resolvedCount: completed,
+            openComplaints: open, 
             inProgress: staffWOs.filter((wo: any) => wo.status === 'In Progress' || wo.status === 'WIP').length,
-            avgResolutionTime: '4.2h', // Mock for now, requires complex date diff
+            avgResolutionTime: avgResStr,
             slaCompliancePercent,
             slaViolated: slaBreached,
-            score: score
           };
         });
 
-        // specific mock override if list is empty to show something? 
-        // No, let's rely on seed data. Seed data has 20 field_staff (100 users / 5).
         setOfficers(processedOfficers);
 
       } catch (err) {
@@ -135,22 +131,20 @@ export default function FieldTeam() {
     ? Math.round(activeOfficers.reduce((sum, o) => sum + o.slaCompliancePercent, 0) / activeOfficers.length)
     : 100;
 
-  const performanceData = activeOfficers.map((o) => ({
+  const officerWorkloadData = activeOfficers.map((o) => ({
     name: o.name.replace('Field ', ''),
-    score: o.score,
     compliance: o.slaCompliancePercent,
     assigned: o.totalAssigned,
     resolved: o.resolvedCount,
-  }));
+  })).sort((a, b) => b.assigned - a.assigned);
 
-  const radarChartData = [...performanceData];
+  const radarChartData = [...officerWorkloadData];
   while (radarChartData.length > 0 && radarChartData.length < 3) {
     radarChartData.push({
       name: ' ',
-      score: 0,
-      compliance: 0,
-      assigned: 0,
-      resolved: 0,
+      compliance: radarChartData[0].compliance,
+      assigned: radarChartData[0].assigned,
+      resolved: radarChartData[0].resolved,
     });
   }
 
@@ -161,19 +155,52 @@ export default function FieldTeam() {
     { key: 'totalAssigned', header: 'Assigned' },
     { key: 'resolvedCount', header: 'Resolved' },
     { key: 'openComplaints', header: 'Not Resolved' },
-    {
-      key: 'score',
-      header: 'Score',
-      render: (o: any) => <GaugeChart value={o.score} label="" size="xs" />,
-    },
   ];
 
   const workOrderColumns = [
-    { key: 'id', header: 'ID', render: (w: any) => <span className="font-mono text-xs">{String(w.id).slice(0, 8)}...</span> },
+    { 
+      key: 'serial', 
+      header: 'S.No', 
+      render: (_w: any, index?: number) => <span className="font-mono text-xs text-slate-500">{(index ?? 0) + 1}</span> 
+    },
+    { 
+      key: 'created_at', 
+      header: 'Timestamp', 
+      render: (w: any) => {
+        if (!w.created_at) return <span className="text-muted-foreground">-</span>;
+        return (
+          <div className="flex flex-col">
+            <span className="font-medium text-slate-700">{new Date(w.created_at).toLocaleDateString()}</span>
+            <span className="text-xs text-slate-500">{new Date(w.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+          </div>
+        );
+      }
+    },
     { key: 'work_type', header: 'Work Type' },
+    { 
+      key: 'staff', 
+      header: 'Assigned Officer', 
+      render: (w: any) => {
+        if (!w.staff_id || w.staff_id === 'SELF') {
+          return <span className="text-muted-foreground">Unassigned</span>;
+        }
+        const officer = officers.find(o => 
+          String(o.id) === String(w.staff_id) || 
+          String(o.phone) === String(w.staff_id) || 
+          String(o.username) === String(w.staff_id) ||
+          String(o.mobile_number) === String(w.staff_id)
+        );
+        
+        let displayName = officer?.name || '';
+        // If officer name is missing or just raw phone digits, format clearly as Field Officer
+        if (!displayName || /^\d+$/.test(displayName)) {
+          displayName = `Field Officer (${w.staff_id})`;
+        }
+
+        return <span className="font-medium text-slate-700">{displayName}</span>;
+      }
+    },
     { key: 'status', header: 'Status', render: (w: any) => <StatusBadge status={w.status} /> },
-    { key: 'action_taken', header: 'Action Taken', render: (w: any) => <span className="truncate max-w-[200px] block" title={w.action_taken}>{w.action_taken || '-'}</span> },
-    { key: 'sla_deadline', header: 'SLA Deadline', render: (w: any) => <span className="text-xs text-muted-foreground">{w.sla_deadline ? new Date(w.sla_deadline).toLocaleDateString() : '-'}</span> },
   ];
 
   const filteredWorkOrders = selectedOfficer === 'all' 
@@ -182,46 +209,49 @@ export default function FieldTeam() {
 
   if (loading) {
     return (
-      <DashboardLayout title="Field Team" subtitle="Loading...">
+      <DashboardLayout title="Officer">
         <div className="flex h-64 items-center justify-center">Loading team data...</div>
       </DashboardLayout>
     );
   }
 
   return (
-    <DashboardLayout title="Field Team" subtitle={`Workforce management and performance tracking • ${selectedDate}`}>
+    <DashboardLayout title="Officer">
       <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <KPICard
           title="Active Officers"
           value={activeOfficers.length}
           icon={<HardHat className="h-5 w-5" />}
+          onClick={() => setModalState({ isOpen: true, type: 'officers' })}
         />
         <KPICard
           title="Total Assigned"
           value={totalAssigned}
           icon={<Users className="h-5 w-5" />}
+          onClick={() => setModalState({ isOpen: true, type: 'assigned' })}
         />
         <KPICard
           title="Pending Tasks"
           value={totalOpen}
           icon={<Clock className="h-5 w-5" />}
           variant={totalOpen > 10 ? 'warning' : 'success'}
+          onClick={() => setModalState({ isOpen: true, type: 'pending' })}
         />
       </div>
 
       {/* Charts */}
       <div className="mb-6 grid gap-6 lg:grid-cols-2">
-        {/* Performance Radar */}
+        {/* Workload Radar */}
         <div className="chart-container">
-          <h4 className="mb-4 font-semibold">Top Performers Analysis</h4>
+          <h4 className="mb-4 font-semibold">Officer Workload Analysis</h4>
           <ResponsiveContainer width="100%" height={300}>
             <RadarChart outerRadius={90} data={radarChartData.slice(0, 5)}>
               <PolarGrid stroke="hsl(var(--border))" />
               <PolarAngleAxis dataKey="name" tick={{ fontSize: 12 }} />
-              <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fontSize: 10 }} />
+              <PolarRadiusAxis angle={30} domain={[0, 'auto']} tick={{ fontSize: 10 }} />
               <Radar
-                name="Performance Score"
-                dataKey="score"
+                name="Total Work Assigned"
+                dataKey="assigned"
                 stroke="hsl(var(--primary))"
                 fill="hsl(var(--primary))"
                 fillOpacity={0.4}
@@ -235,7 +265,7 @@ export default function FieldTeam() {
         <div className="chart-container">
           <h4 className="mb-4 font-semibold">Workload vs Resolution</h4>
           <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={performanceData.slice(0, 8)}>
+            <BarChart data={officerWorkloadData.slice(0, 8)}>
               <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
               <XAxis 
                 dataKey="name" 
@@ -283,6 +313,29 @@ export default function FieldTeam() {
         </div>
         <DataTable data={filteredWorkOrders} columns={workOrderColumns} maxHeight="400px" />
       </div>
+
+      <GenericListModal
+        isOpen={modalState.isOpen}
+        onClose={() => setModalState({ isOpen: false, type: null })}
+        title={
+          modalState.type === 'officers'
+            ? 'Active Field Officers'
+            : modalState.type === 'assigned'
+            ? 'All Assigned Tasks'
+            : 'Pending Tasks'
+        }
+        data={
+          modalState.type === 'officers'
+            ? activeOfficers
+            : modalState.type === 'assigned'
+            ? workOrders
+            : workOrders.filter(wo => {
+                const s = (wo.status || '').toUpperCase();
+                return s === 'PENDING' || s === 'SUBMITTED';
+              })
+        }
+        columns={modalState.type === 'officers' ? officerColumns : workOrderColumns}
+      />
     </DashboardLayout>
   );
 }

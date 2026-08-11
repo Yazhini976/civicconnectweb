@@ -1,6 +1,6 @@
 import { useState, KeyboardEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { Building2, ShieldCheck, User, Lock, Eye, EyeOff } from "lucide-react";
+import { Building2, User, Lock, Eye, EyeOff } from "lucide-react";
 import { API_BASE_URL } from "../services/api";
 
 const Login = () => {
@@ -29,11 +29,16 @@ const Login = () => {
 
       if (res.ok) {
         const data = await res.json();
+        const todayStr = new Date().toISOString().split('T')[0];
+        localStorage.setItem("selectedDate", todayStr);
+        localStorage.setItem("selectedEndDate", todayStr);
         localStorage.setItem("user", JSON.stringify({ 
-          username: data.username, 
+          username: data.username || username, 
           role: data.role, 
           modules: data.modules 
         }));
+        localStorage.setItem("user_role", data.role || "");
+        localStorage.setItem("username", data.username || username);
         // Save JWT token for API authentication
         if (data.token) {
           localStorage.setItem("auth_token", data.token);
@@ -90,11 +95,6 @@ const Login = () => {
           </div>
 
           <div className="mb-8">
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-100 border border-slate-200 mb-6">
-              <ShieldCheck className="w-4 h-4 text-slate-600" />
-              <span className="text-xs font-bold text-slate-600 tracking-wide uppercase">Secure Login</span>
-            </div>
-            
             <h2 className="text-3xl font-bold text-slate-900 tracking-tight mb-2">Welcome Back</h2>
             <p className="text-slate-500 text-sm">Please sign in to access your dashboard.</p>
           </div>
@@ -113,6 +113,7 @@ const Login = () => {
                   type="text"
                   placeholder="Enter your username"
                   value={username}
+                  maxLength={10}
                   onChange={(e) => { setUsername(e.target.value); setError(""); }}
                   onKeyDown={handleKeyDown}
                   className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 transition-all placeholder:text-slate-400"
@@ -133,6 +134,7 @@ const Login = () => {
                   type={showPass ? "text" : "password"}
                   placeholder="Enter your password"
                   value={password}
+                  maxLength={10}
                   onChange={(e) => { setPassword(e.target.value); setError(""); }}
                   onKeyDown={handleKeyDown}
                   className="w-full pl-11 pr-11 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/20 focus:border-cyan-500 transition-all placeholder:text-slate-400"

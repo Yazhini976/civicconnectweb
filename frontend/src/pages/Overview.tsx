@@ -14,7 +14,16 @@ import {
   getSLATrend,
   getEnergyTrend,
   getOfficerStats,
+  getWards,
+  getComplaints,
 } from '@/services/api';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import {
   generateSTPData,
   CONFIG,
@@ -88,6 +97,17 @@ export default function Overview() {
 
   const [allTimeStats, setAllTimeStats] = useState<{ complaints: number, faults: number }>({ complaints: 0, faults: 0 });
   const [allTimeStatsObj, setAllTimeStatsObj] = useState<Record<string, number>>({});
+  const [rawComplaints, setRawComplaints] = useState<any[]>([]);
+  const [selectedWard, setSelectedWard] = useState<number | null>(null);
+  const [wards, setWards] = useState<any[]>([]);
+
+  useEffect(() => {
+    getWards().then((res) => {
+      if (res && Array.isArray(res.wards)) {
+        setWards(res.wards);
+      }
+    }).catch(() => {});
+  }, []);
 
   /* =======================
      MODAL STATE
@@ -95,9 +115,9 @@ export default function Overview() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalTitle, setModalTitle] = useState('');
   const [modalTimeRange, setModalTimeRange] = useState<'all-time'|'today'>('all-time');
-  const [modalStatus, setModalStatus] = useState<'all' | 'Resolved' | 'In Progress' | 'Submitted'>('all');
+  const [modalStatus, setModalStatus] = useState<'all' | 'Resolved' | 'In Progress' | 'Submitted' | 'Pending' | 'Rejected'>('all');
 
-  const openModal = (title: string, timeRange: 'all-time'|'today', status: 'all' | 'Resolved' | 'In Progress' | 'Submitted') => {
+  const openModal = (title: string, timeRange: 'all-time'|'today', status: 'all' | 'Resolved' | 'In Progress' | 'Submitted' | 'Pending' | 'Rejected') => {
     setModalTitle(title);
     setModalTimeRange(timeRange);
     setModalStatus(status);
@@ -121,7 +141,8 @@ export default function Overview() {
           allTimeFaults,
           slaData,
           energyData,
-          officerData
+          officerData,
+          complaintsData,
         ] = await Promise.all([
           getComplaintStats(selectedDate),
           getComplaintTypeStats(selectedDate),
@@ -133,6 +154,7 @@ export default function Overview() {
           getSLATrend(selectedDate),
           getEnergyTrend(selectedDate),
           getOfficerStats(),
+          getComplaints(),     // All complaints for ward filtering
         ]);
 
         setComplaintStats(statsData || {});
@@ -143,6 +165,7 @@ export default function Overview() {
         setSlaTrend(slaData || []);
         setEnergyTrend(energyData || []);
         setOfficerStats(officerData || []);
+        setRawComplaints(Array.isArray(complaintsData) ? complaintsData : []);
 
         // Calculate all-time totals from the untyped status object
         const safeAllTimeComplaints = (allTimeComplaints && typeof allTimeComplaints === 'object' && !('error' in allTimeComplaints)) ? allTimeComplaints : {};
@@ -163,48 +186,66 @@ export default function Overview() {
   }, [selectedDate]);
 
   /* =======================
-     DERIVED DATA
+     WARD FILTERED COMPLAINTS
      ======================= */
+  const wardFilteredComplaints = useMemo(() => {
+    if (selectedWard === null) return rawComplaints;
+    return rawComplaints.filter(c =>
+      String(c.ward_number) === String(selectedWard) ||
+      Number(c.ward_number) === selectedWard
+    );
+  }, [rawComplaints, selectedWard]);
+
+  /* =======================
+     DERIVED KPI COUNTS (WARD-AWARE)
+     ======================= */
+  const wardTotalComplaints = wardFilteredComplaints.length;
+  const wardResolvedCount = wardFilteredComplaints.filter(c => {
+    const s = (c.status || '').toUpperCase();
+    return s === 'RESOLVED' || s === 'COMPLETED';
+  }).length;
+  const wardPendingCount = wardFilteredComplaints.filter(c => {
+    const s = (c.status || '').toUpperCase();
+    return s === 'SUBMITTED' || s === 'PENDING' || s === 'ASSIGNED';
+  }).length;
+  const wardInProgressCount = wardFilteredComplaints.filter(c => {
+    const s = (c.status || '').toUpperCase();
+    return s === 'IN PROGRESS' || s === 'IN_PROGRESS' || s === 'WIP';
+  }).length;
+
+  /* =======================
+     CHART DATA (WARD-AWARE)
+     ======================= */
+  const wardComplaintsByStatus = useMemo(() => {
+    const statuses = ['Submitted', 'In Progress', 'Resolved', 'Rejected'];
+    const map: Record<string, number> = {};
+    statuses.forEach(s => map[s] = 0);
+    wardFilteredComplaints.forEach(c => {
+      const s = c.status || 'Submitted';
+      if (map[s] !== undefined) map[s]++;
+      else map['Submitted']++;
+    });
+    return Object.entries(map).map(([status, count]) => ({ status, count }));
+  }, [wardFilteredComplaints]);
+
+  const wardComplaintsByType = useMemo(() => {
+    const map: Record<string, number> = {};
+    wardFilteredComplaints.forEach(c => {
+      const t = c.type || c.category || 'Other';
+      map[t] = (map[t] || 0) + 1;
+    });
+    const sorted = Object.entries(map).map(([type, count]) => ({ type, count })).sort((a, b) => b.count - a.count);
+    if (sorted.length <= 5) return sorted;
+    const top5 = sorted.slice(0, 5);
+    const othersCount = sorted.slice(5).reduce((sum, item) => sum + item.count, 0);
+    return [...top5, { type: 'Others', count: othersCount }];
+  }, [wardFilteredComplaints]);
+
   const safeComplaintStats = (complaintStats && typeof complaintStats === 'object' && !('error' in complaintStats)) ? complaintStats : {};
   const totalComplaints = Object.values(safeComplaintStats).reduce((acc: number, val: any) => acc + (typeof val === 'number' ? val : 0), 0);
   const resolvedCount = typeof safeComplaintStats['Resolved'] === 'number' ? safeComplaintStats['Resolved'] : 0;
   const pendingCount = Math.max(0, totalComplaints - resolvedCount);
 
-  const liftingStations = stations.filter((s) => s.type === 'Lifting Station' || s.type === 'lifting');
-  const pumpingStations = stations.filter((s) => s.type === 'Pumping Station' || s.type === 'pumping');
-  const stpStations = stations.filter((s) => s.type === 'STP' || s.type === 'stp');
-
-  const complaintsByStatus = useMemo(() => {
-    const statuses = ['Submitted', 'In Progress', 'Resolved', 'Rejected'];
-    const map: Record<string, number> = {};
-    statuses.forEach(s => map[s] = 0);
-    Object.entries(complaintStats).forEach(([status, count]) => {
-      map[status] = count;
-    });
-    return Object.entries(map).map(([status, count]) => ({ status, count }));
-  }, [complaintStats]);
-
-  /* =======================
-     COMPLAINT TYPE (REAL)
-     ======================= */
-  const complaintsByType = useMemo(() => {
-    return Object.entries(complaintTypeStats).map(([type, count]) => ({
-      type,
-      count
-    })).sort((a, b) => b.count - a.count);
-  }, [complaintTypeStats]);
-
-  const complaintsByTypeDisplay = useMemo(() => {
-    if (complaintsByType.length <= 5) return complaintsByType;
-    
-    const top5 = complaintsByType.slice(0, 5);
-    const othersCount = complaintsByType.slice(5).reduce((sum, item) => sum + item.count, 0);
-    
-    return [
-      ...top5,
-      { type: 'Others', count: othersCount }
-    ];
-  }, [complaintsByType]);
 
   const avgSlaCompliance = useMemo(() => {
     if (officerStats.length === 0) return 100;
@@ -224,90 +265,82 @@ export default function Overview() {
   return (
     <DashboardLayout
       title="Civic Connect Admin Dashboard"
-      subtitle={`Dashboard data for ${selectedDate}`}
+      subtitle="Real-time Command Center Dashboard"
     >
       {/* System Overview Strip */}
-      <div className="mb-6 flex flex-wrap items-center gap-4 rounded-xl bg-gradient-hero p-4 text-primary-foreground">
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-4 rounded-xl bg-gradient-hero p-4 text-primary-foreground shadow-sm">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-medium opacity-80">Total Wards:</span>
-          <span className="font-bold">{CONFIG.totalWards}</span>
+          <span className="text-sm font-medium opacity-90">Total Wards:</span>
+          <span className="font-bold text-lg">{wards.length || CONFIG.totalWards || 42}</span>
+        </div>
+
+        {/* Filter Controls (Ward Select) */}
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2 bg-white/10 px-3 py-1.5 rounded-lg border border-white/20">
+            <span className="text-xs font-medium text-white/90">Filter Ward:</span>
+            <Select 
+              value={selectedWard === null ? 'all' : String(selectedWard)} 
+              onValueChange={(val) => setSelectedWard(val === 'all' ? null : Number(val))}
+            >
+              <SelectTrigger className="h-7 w-[140px] text-xs font-semibold bg-white text-slate-800 border-none">
+                <SelectValue placeholder="All Wards" />
+              </SelectTrigger>
+              <SelectContent className="max-h-60">
+                <SelectItem value="all">All Wards ({wards.length || 42})</SelectItem>
+                {(wards.length > 0 ? wards : Array.from({ length: 42 }, (_, i) => ({ ward_no: i + 1, ward_name: `Ward ${i + 1}` }))).map((w) => (
+                  <SelectItem key={w.ward_no} value={String(w.ward_no)}>
+                    Ward {w.ward_no}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
       </div>      {/* =======================
           KPI CARDS (OVERALL)
           ======================= */}
-      <h2 className="mb-4 text-xl font-bold tracking-tight">Overall Complaints</h2>
+      <h2 className="mb-4 text-xl font-bold tracking-tight">
+        {selectedWard ? `Ward ${selectedWard} Complaints` : 'Overall Complaints'}
+      </h2>
       <div className="mb-8 grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-4">
         <KPICard
           title="Total Complaints"
-          value={allTimeStats.complaints}
+          value={selectedWard !== null ? wardTotalComplaints : allTimeStats.complaints}
           icon={<Users className="h-6 w-6" />}
           onClick={() => openModal('Total Complaints', 'all-time', 'all')}
         />
         <KPICard
           title="Resolved"
-          value={allTimeStatsObj['Resolved'] || 0}
+          value={selectedWard !== null ? wardResolvedCount : (allTimeStatsObj['Resolved'] || 0)}
           icon={<CheckCircle2 className="h-6 w-6" />}
           variant="success"
           onClick={() => openModal('Resolved Complaints', 'all-time', 'Resolved')}
         />
         <KPICard
           title="Pending"
-          value={allTimeStatsObj['Submitted'] || 0}
+          value={selectedWard !== null ? wardPendingCount : (allTimeStatsObj['Submitted'] || 0)}
           icon={<Clock className="h-6 w-6" />}
           variant="warning"
-          onClick={() => openModal('Pending Complaints', 'all-time', 'Submitted')}
+          onClick={() => openModal('Pending Complaints', 'all-time', 'Pending')}
         />
         <KPICard
           title="In Progress"
-          value={allTimeStatsObj['In Progress'] || 0}
+          value={selectedWard !== null ? wardInProgressCount : (allTimeStatsObj['In Progress'] || 0)}
           icon={<Zap className="h-6 w-6" />}
           variant="info"
           onClick={() => openModal('In Progress Complaints', 'all-time', 'In Progress')}
         />
       </div>
 
-      {/* =======================
-          KPI CARDS (TODAY)
-          ======================= */}
-      <h2 className="mb-4 text-xl font-bold tracking-tight">Today's Complaints</h2>
-      <div className="mb-8 grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-4">
-        <KPICard
-          title="Complaints Made Today"
-          value={totalComplaints}
-          icon={<Users className="h-6 w-6" />}
-          onClick={() => openModal("Today's Complaints", 'today', 'all')}
-        />
-        <KPICard
-          title="Resolved Today"
-          value={resolvedCount}
-          icon={<CheckCircle2 className="h-6 w-6" />}
-          variant="success"
-          onClick={() => openModal('Resolved Today', 'today', 'Resolved')}
-        />
-        <KPICard
-          title="Pending Today"
-          value={complaintStats['Submitted'] || 0}
-          icon={<Clock className="h-6 w-6" />}
-          variant="warning"
-          onClick={() => openModal('Pending Today', 'today', 'Submitted')}
-        />
-        <KPICard
-          title="In Progress Today"
-          value={complaintStats['In Progress'] || 0}
-          icon={<Zap className="h-6 w-6" />}
-          variant="info"
-          onClick={() => openModal('In Progress Today', 'today', 'In Progress')}
-        />
-      </div>
 
       {/* =======================
           CHARTS ROW 1
           ======================= */}
       <div className="mb-6 grid gap-6 lg:grid-cols-2">
         <div className="chart-container">
-          <h3 className="mb-4 text-lg font-semibold">Complaints by Type</h3>
+          <h3 className="mb-4 text-lg font-semibold">Complaints by Type{selectedWard ? ` – Ward ${selectedWard}` : ''}</h3>
           <StandardPieChart
-            data={complaintsByTypeDisplay}
+            data={wardComplaintsByType}
             dataKey="count"
             nameKey="type"
             tooltipFormatter={(value: number) => `${value} Complaints`}
@@ -315,9 +348,9 @@ export default function Overview() {
         </div>
 
         <div className="chart-container">
-          <h3 className="mb-4 text-lg font-semibold">Complaints by Status</h3>
+          <h3 className="mb-4 text-lg font-semibold">Complaints by Status{selectedWard ? ` – Ward ${selectedWard}` : ''}</h3>
           <ResponsiveContainer width="100%" height={400}>
-            <BarChart data={complaintsByStatus} margin={{ top: 20, right: 30, left: 0, bottom: 0 }}>
+            <BarChart data={wardComplaintsByStatus} margin={{ top: 20, right: 30, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
               <XAxis
                 dataKey="status"
@@ -349,10 +382,6 @@ export default function Overview() {
               />
             </BarChart>
           </ResponsiveContainer>
-          <div className="mt-4 flex items-center justify-between text-sm">
-            <span className="text-slate-500">2 pending faults</span>
-            <span className="font-medium text-primary">87% Active</span>
-          </div>
         </div>
       </div>
 
@@ -363,6 +392,7 @@ export default function Overview() {
         timeRange={modalTimeRange}
         selectedDate={selectedDate}
         statusFilter={modalStatus}
+        complaintsList={selectedWard !== null ? wardFilteredComplaints : undefined}
       />
     </DashboardLayout>
   );

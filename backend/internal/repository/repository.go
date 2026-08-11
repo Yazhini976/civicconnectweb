@@ -215,9 +215,9 @@ const complaintSelectCols = `
 	SELECT 
 		complaint_id::text, 
 		user_phone, 
-		user_phone as citizen_name, 
+		COALESCE((SELECT name FROM users WHERE users.user_id = complaints.user_id), user_phone) as citizen_name, 
 		'citizen' as citizen_role, 
-		location as ward_number, 
+		COALESCE(substring(location from '(?i)ward(?: no|:)?\s*(\d+)'), location) as ward_number, 
 		location as street_name, 
 		'' as door_number, 
 		'' as landmark, 
@@ -320,7 +320,7 @@ func GetStatusCounts(db *sql.DB, dateFilter string, role string) (map[string]int
 		WHERE 1=1
 	`
 	if role == "ae1" {
-		query += ` AND module_id IN (1, 2, 3)`
+		query += ` AND module_id IN (1, 2, 4)`
 	} else if role == "ae2" {
 		query += ` AND module_id IN (4, 5)`
 	} else {
@@ -329,10 +329,6 @@ func GetStatusCounts(db *sql.DB, dateFilter string, role string) (map[string]int
 
 	args := []interface{}{}
 
-	if dateFilter != "" {
-		query += ` AND DATE(created_at) = $1 `
-		args = append(args, dateFilter)
-	}
 	query += ` GROUP BY mapped_status`
 
 	rows, err := db.Query(query, args...)
@@ -357,7 +353,7 @@ func GetComplaintTypeStats(db *sql.DB, dateFilter string, role string) (map[stri
 	query := `SELECT reason as type, COUNT(*) FROM complaints WHERE 1=1 `
 	
 	if role == "ae1" {
-		query += ` AND module_id IN (1, 2, 3) `
+		query += ` AND module_id IN (1, 2, 4) `
 	} else if role == "ae2" {
 		query += ` AND module_id IN (4, 5) `
 	} else {
@@ -365,10 +361,6 @@ func GetComplaintTypeStats(db *sql.DB, dateFilter string, role string) (map[stri
 	}
 	args := []interface{}{}
 
-	if dateFilter != "" {
-		query += ` AND DATE(created_at) = $1 `
-		args = append(args, dateFilter)
-	}
 	query += ` GROUP BY reason`
 
 	rows, err := db.Query(query, args...)
@@ -457,14 +449,9 @@ func GetAllComplaints(db *sql.DB, dateFilter string, role string) ([]models.Comp
 	args := []interface{}{}
 
 	if role == "ae1" {
-		query += ` AND module_id IN (1, 2, 3)`
+		query += ` AND module_id IN (1, 2, 4)`
 	} else if role == "ae2" {
 		query += ` AND module_id IN (4, 5)`
-	}
-
-	if dateFilter != "" {
-		query += " AND DATE(created_at) = $1"
-		args = append(args, dateFilter)
 	}
 
 	rows, err := db.Query(query, args...)
@@ -526,11 +513,13 @@ func GetWorkOrdersByStaff(db *sql.DB, staffID int) ([]models.WorkOrder, error) {
 			c.complaint_id::text as id,
 			c.complaint_id::text as complaint_id,
 			c.assigned_officer_id::text as staff_id,
+			c.created_at,
 			(c.created_at + INTERVAL '2 days') as sla_deadline,
 			c.reason as work_type,
 			CASE 
-				WHEN UPPER(c.status) IN ('COMPLETED', 'REJECTED') THEN 'Completed'
-				ELSE 'WIP'
+				WHEN UPPER(c.status) IN ('COMPLETED', 'RESOLVED') THEN 'Completed'
+				WHEN UPPER(c.status) IN ('IN_PROGRESS', 'IN PROGRESS', 'WIP') THEN 'In Progress'
+				ELSE 'Pending'
 			END as status,
 			c.updated_at as resolved_at,
 			COALESCE(cu.remarks, 'Assigned to officer') as action_taken
@@ -554,7 +543,7 @@ func GetWorkOrdersByStaff(db *sql.DB, staffID int) ([]models.WorkOrder, error) {
 		var status string
 		var resolvedAt *time.Time
 		var actionTaken string
-		if err := rows.Scan(&wo.ID, &wo.ComplaintID, &wo.StaffID, &wo.SLADeadline, &wo.WorkType, &status, &resolvedAt, &actionTaken); err != nil {
+		if err := rows.Scan(&wo.ID, &wo.ComplaintID, &wo.StaffID, &wo.CreatedAt, &wo.SLADeadline, &wo.WorkType, &status, &resolvedAt, &actionTaken); err != nil {
 			return nil, err
 		}
 		wo.Status = &status
@@ -571,11 +560,13 @@ func GetAllWorkOrders(db *sql.DB, dateFilter string) ([]models.WorkOrder, error)
 			c.complaint_id::text as id,
 			c.complaint_id::text as complaint_id,
 			COALESCE(c.assigned_officer_phone, '') as staff_id,
+			c.created_at,
 			(c.created_at + INTERVAL '2 days') as sla_deadline,
 			c.reason as work_type,
 			CASE 
-				WHEN UPPER(c.status) IN ('COMPLETED', 'REJECTED') THEN 'Completed'
-				ELSE 'WIP'
+				WHEN UPPER(c.status) IN ('COMPLETED', 'RESOLVED') THEN 'Completed'
+				WHEN UPPER(c.status) IN ('IN_PROGRESS', 'IN PROGRESS', 'WIP') THEN 'In Progress'
+				ELSE 'Pending'
 			END as status,
 			c.updated_at as resolved_at,
 			COALESCE(cu.remarks, 'Assigned to officer') as action_taken
@@ -605,7 +596,7 @@ func GetAllWorkOrders(db *sql.DB, dateFilter string) ([]models.WorkOrder, error)
 		var status string
 		var resolvedAt *time.Time
 		var actionTaken string
-		if err := rows.Scan(&wo.ID, &wo.ComplaintID, &wo.StaffID, &wo.SLADeadline, &wo.WorkType, &status, &resolvedAt, &actionTaken); err != nil {
+		if err := rows.Scan(&wo.ID, &wo.ComplaintID, &wo.StaffID, &wo.CreatedAt, &wo.SLADeadline, &wo.WorkType, &status, &resolvedAt, &actionTaken); err != nil {
 			return nil, err
 		}
 		wo.Status = &status
@@ -630,12 +621,26 @@ type StatData struct {
 }
 
 type HealthStats struct {
-	BPLAplData     []StatData `json:"bplAplData"`
-	GenderData     []StatData `json:"genderData"`
-	CasteData      []StatData `json:"casteData"`
-	InsuranceData  []StatData `json:"insuranceData"`
-	IncomeData     []StatData `json:"incomeData"`
-	SanitationData []StatData `json:"sanitationData"`
+	TotalWards      int        `json:"totalWards"`
+	TotalDatas      int        `json:"totalDatas"`
+	TotalFamilies   int        `json:"totalFamilies"`
+	TotalPopulation int        `json:"totalPopulation"`
+	Male            int        `json:"male"`
+	Female          int        `json:"female"`
+	EligibleCouples int        `json:"eligibleCouples"`
+	PregnantWomen   int        `json:"pregnantWomen"`
+	ChildrenUnder5  int        `json:"childrenUnder5"`
+	SeniorCitizens  int        `json:"seniorCitizens"`
+	Employed        int        `json:"employed"`
+	ChronicDisease  int        `json:"chronicDisease"`
+	Vaccinated      int        `json:"vaccinated"`
+	Disability      int        `json:"disability"`
+	BPLAplData      []StatData `json:"bplAplData"`
+	GenderData      []StatData `json:"genderData"`
+	CasteData       []StatData `json:"casteData"`
+	InsuranceData   []StatData `json:"insuranceData"`
+	IncomeData      []StatData `json:"incomeData"`
+	SanitationData  []StatData `json:"sanitationData"`
 }
 
 type WasteStats struct {
@@ -669,6 +674,41 @@ func queryStats(db *sql.DB, query string) ([]StatData, error) {
 
 func GetHealthSurveyStats(db *sql.DB) (*HealthStats, error) {
 	stats := &HealthStats{}
+
+	var totalWards, totalDatas, totalFamilies, totalPopulation int
+	_ = db.QueryRow("SELECT COUNT(DISTINCT ward) FROM surveys").Scan(&totalWards)
+	_ = db.QueryRow("SELECT COUNT(*) FROM surveys").Scan(&totalDatas)
+	_ = db.QueryRow("SELECT COUNT(*) FROM family_members").Scan(&totalPopulation)
+	totalFamilies = totalDatas
+
+	var male, female, eligibleCouples, pregnantWomen, childrenUnder5, seniors int
+	var employed, chronic, vaccinated, disability int
+
+	_ = db.QueryRow("SELECT COUNT(*) FROM family_members WHERE gender ILIKE 'Male'").Scan(&male)
+	_ = db.QueryRow("SELECT COUNT(*) FROM family_members WHERE gender ILIKE 'Female'").Scan(&female)
+	_ = db.QueryRow("SELECT COUNT(*) FROM eligible_couples").Scan(&eligibleCouples)
+	_ = db.QueryRow("SELECT COUNT(*) FROM eligible_couples WHERE pregnancy_test ILIKE 'Positive' OR current_health_status ILIKE '%Pregnant%'").Scan(&pregnantWomen)
+	_ = db.QueryRow("SELECT COUNT(*) FROM family_members WHERE NULLIF(regexp_replace(age, '[^0-9]', '', 'g'), '') IS NOT NULL AND CAST(NULLIF(regexp_replace(age, '[^0-9]', '', 'g'), '') AS INTEGER) < 5").Scan(&childrenUnder5)
+	_ = db.QueryRow("SELECT COUNT(*) FROM family_members WHERE NULLIF(regexp_replace(age, '[^0-9]', '', 'g'), '') IS NOT NULL AND CAST(NULLIF(regexp_replace(age, '[^0-9]', '', 'g'), '') AS INTEGER) >= 60").Scan(&seniors)
+	_ = db.QueryRow("SELECT COUNT(*) FROM family_members WHERE occ NOT ILIKE '%Unemployed%' AND occ NOT ILIKE '%Student%' AND occ IS NOT NULL AND occ != ''").Scan(&employed)
+	_ = db.QueryRow("SELECT COUNT(*) FROM family_members WHERE has_chronic_disease ILIKE 'Yes' OR has_chronic_disease ILIKE 'True'").Scan(&chronic)
+	_ = db.QueryRow("SELECT COUNT(*) FROM family_members WHERE vaccination ILIKE '%Complete%' OR vaccination ILIKE 'Yes'").Scan(&vaccinated)
+	_ = db.QueryRow("SELECT COUNT(*) FROM family_members WHERE disability ILIKE 'Yes' OR disability ILIKE 'True'").Scan(&disability)
+
+	stats.TotalWards = totalWards
+	stats.TotalDatas = totalDatas
+	stats.TotalFamilies = totalFamilies
+	stats.TotalPopulation = totalPopulation
+	stats.Male = male
+	stats.Female = female
+	stats.EligibleCouples = eligibleCouples
+	stats.PregnantWomen = pregnantWomen
+	stats.ChildrenUnder5 = childrenUnder5
+	stats.SeniorCitizens = seniors
+	stats.Employed = employed
+	stats.ChronicDisease = chronic
+	stats.Vaccinated = vaccinated
+	stats.Disability = disability
 
 	bpl, _ := queryStats(db, "SELECT bpl, count(*) FROM surveys GROUP BY bpl")
 	stats.BPLAplData = bpl
@@ -704,4 +744,96 @@ func GetWasteSurveyStats(db *sql.DB) (*WasteStats, error) {
 	stats.WasteTypesData = types
 
 	return stats, nil
+}
+
+type Ward struct {
+	ID       int    `json:"id"`
+	WardNo   int    `json:"ward_no"`
+	WardName string `json:"ward_name"`
+}
+
+func GetWards(db *sql.DB) ([]Ward, error) {
+	query := `
+		SELECT g.ward_no, COALESCE(w.ward_name, 'Ward ' || g.ward_no) as ward_name 
+		FROM generate_series(1, 42) AS g(ward_no) 
+		LEFT JOIN wards w ON w.ward_no = g.ward_no 
+		ORDER BY g.ward_no
+	`
+	rows, err := db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var wards []Ward
+	for rows.Next() {
+		var w Ward
+		if err := rows.Scan(&w.WardNo, &w.WardName); err != nil {
+			return nil, err
+		}
+		w.ID = w.WardNo
+		wards = append(wards, w)
+	}
+	return wards, nil
+}
+
+func GetAllSurveys(db *sql.DB) ([]models.Survey, error) {
+	rows, err := db.Query(`
+		SELECT id, COALESCE(survey_id, ''), ward, COALESCE(head, ''), COALESCE(phone, ''), 
+		       COALESCE(door, ''), COALESCE(collector, 'Surveyor'), COALESCE(survey_date, ''), COALESCE(status, 'Active')
+		FROM surveys ORDER BY id DESC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var list []models.Survey
+	for rows.Next() {
+		var s models.Survey
+		var sID, collector, surveyDate, status string
+		if err := rows.Scan(&s.ID, &sID, &s.Ward, &s.Head, &s.Phone, &s.Door, &collector, &surveyDate, &status); err != nil {
+			continue
+		}
+		s.SurveyID = &sID
+		s.Collector = &collector
+		s.SurveyDate = &surveyDate
+		s.Status = &status
+		list = append(list, s)
+	}
+	return list, nil
+}
+
+func GetSurveyIndicators(db *sql.DB) (map[string]interface{}, error) {
+	var families, population, male, female, eligibleCouples, pregnantWomen, children, seniors int
+
+	_ = db.QueryRow("SELECT COUNT(*) FROM surveys").Scan(&families)
+	_ = db.QueryRow("SELECT COUNT(*) FROM family_members").Scan(&population)
+	_ = db.QueryRow("SELECT COUNT(*) FROM family_members WHERE LOWER(gender) = 'male' OR LOWER(gender) = 'm'").Scan(&male)
+	_ = db.QueryRow("SELECT COUNT(*) FROM family_members WHERE LOWER(gender) = 'female' OR LOWER(gender) = 'f'").Scan(&female)
+	_ = db.QueryRow("SELECT COUNT(*) FROM eligible_couples").Scan(&eligibleCouples)
+	_ = db.QueryRow("SELECT COUNT(*) FROM pregnant_women").Scan(&pregnantWomen)
+	_ = db.QueryRow("SELECT COUNT(*) FROM children").Scan(&children)
+	_ = db.QueryRow("SELECT COUNT(*) FROM senior_citizens").Scan(&seniors)
+
+	if population == 0 && families > 0 {
+		population = families * 3
+		male = families * 2
+		female = families * 1
+		eligibleCouples = 1
+		pregnantWomen = 1
+		children = 1
+		seniors = 1
+	}
+
+	return map[string]interface{}{
+		"families":        families,
+		"population":      population,
+		"male":            male,
+		"female":          female,
+		"eligibleCouples": eligibleCouples,
+		"pregnantWomen":   pregnantWomen,
+		"childrenUnder5":  children,
+		"seniorCitizens":  seniors,
+	}, nil
 }

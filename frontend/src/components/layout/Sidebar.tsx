@@ -1,4 +1,5 @@
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { useState } from 'react';
 import {
   Droplets,
   Activity,
@@ -8,6 +9,7 @@ import {
   MessageSquare,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   LayoutDashboard,
   Users,
   HardHat,
@@ -30,7 +32,7 @@ const MODULE_SUBCATEGORIES: Record<string, string[]> = {
     'Worker Issue',
     'Others',
   ],
-  'Survey': ['Health', 'Solidwaste survey'],
+  'Survey': ['Health', 'Solidwaste survey', 'Indicators', 'Records'],
 };
 
 const MODULE_ICONS: Record<string, any> = {
@@ -51,6 +53,7 @@ interface SidebarProps {
 export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const location = useLocation();
   const navigate = useNavigate();
+  const [reportsExpanded, setReportsExpanded] = useState(false);
 
   const searchParams = new URLSearchParams(location.search);
   const activeCategory = searchParams.get('category') || '';
@@ -58,36 +61,21 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
 
   let userModules: string[] = CIVIC_MODULES;
   try {
-    const userData = localStorage.getItem('user');
-    if (userData) {
-      const parsed = JSON.parse(userData);
-      if (parsed.modules) {
-        userModules = parsed.modules;
-      }
-      
-      // Auto-inject Street Lighting for ae1 if it's missing (to avoid requiring re-login)
-      if (parsed.role === 'ae1' && !userModules.includes('Street Lighting')) {
-        userModules.push('Street Lighting');
-        parsed.modules = userModules;
-        localStorage.setItem('user', JSON.stringify(parsed));
-      }
+    const userData = localStorage.getItem('user') || '';
+    const parsed = userData.startsWith('{') ? JSON.parse(userData) : {};
+    const currentRole = (parsed.role || '').toLowerCase();
 
-      // Auto-inject Survey for admin and ae2 if it's missing
-      if ((parsed.role === 'admin' || parsed.role === 'ae2') && !userModules.includes('Survey')) {
-        userModules.push('Survey');
-        parsed.modules = userModules;
-        localStorage.setItem('user', JSON.stringify(parsed));
-      }
-
-      // Ensure ae3 has all 5 modules
-      if (parsed.role === 'ae3' || parsed.username === 'ae3') {
-        const allModules = ['Water Utility', 'UGSS', 'Street Lighting', 'Solid Waste', 'Survey'];
-        const missingModules = allModules.filter(m => !userModules.includes(m));
-        if (missingModules.length > 0) {
-          userModules = [...new Set([...userModules, ...allModules])];
-          parsed.modules = userModules;
-          localStorage.setItem('user', JSON.stringify(parsed));
-        }
+    // Use modules from DB login response if present
+    if (parsed.modules && Array.isArray(parsed.modules) && parsed.modules.length > 0) {
+      userModules = parsed.modules;
+    } else {
+      // Fallback: infer from role
+      if (currentRole === 'ae1') {
+        userModules = ['Water Utility', 'UGSS', 'Street Lighting'];
+      } else if (currentRole === 'ae2') {
+        userModules = ['Solid Waste', 'Survey'];
+      } else if (currentRole === 'ae3' || currentRole === 'ae4' || currentRole === 'admin') {
+        userModules = ['Water Utility', 'UGSS', 'Street Lighting', 'Solid Waste', 'Survey'];
       }
     }
   } catch (e) {
@@ -154,7 +142,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           </NavLink>
         </div>
 
-        {/* Complaints + Office Performance */}
+        {/* Complaints + Officer */}
         <div className="px-2 mb-2">
           <NavLink
             to="/citizen"
@@ -183,115 +171,84 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
             }
           >
             <HardHat className="h-5 w-5 flex-shrink-0" />
-            {!collapsed && <span>Office Performance</span>}
+            {!collapsed && <span>Officer</span>}
           </NavLink>
         </div>
 
         {/* CIVIC MODULES label */}
         {!collapsed && (
           <div className="px-5 pt-3 pb-2">
-            <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-sidebar-muted">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-sidebar-foreground/50">
               Civic Modules
             </span>
           </div>
         )}
-        {collapsed && (
-          <div className="flex justify-center py-2">
-            <div className="h-px w-8 bg-sidebar-border" />
-          </div>
-        )}
 
-        {/* Module items with subcategories */}
-        <div className="px-2 space-y-0.5">
-          {allowedModules.map((module) => {
-            const Icon = MODULE_ICONS[module];
-            const subcategories = MODULE_SUBCATEGORIES[module];
-            const isModuleActive = location.pathname === '/citizen' && activeCategory === module;
+        <div className="px-2 space-y-1">
+          {allowedModules.map((moduleName) => {
+            const isModuleActive = activeCategory === moduleName;
+            const Icon = MODULE_ICONS[moduleName] || Droplets;
+            const subs = MODULE_SUBCATEGORIES[moduleName] || [];
 
             return (
-              <div key={module} className="group relative">
-                {/* Module button */}
+              <div key={moduleName} className="flex flex-col">
                 <button
-                  onClick={() => handleModuleClick(module)}
-                  title={collapsed ? module : ''}
+                  onClick={() => {
+                    if (isModuleActive) {
+                      navigate('/citizen');
+                    } else if (moduleName === 'Survey') {
+                      navigate(`/citizen?category=Survey&sub=Health`);
+                    } else {
+                      navigate(`/citizen?category=${encodeURIComponent(moduleName)}`);
+                    }
+                  }}
                   className={cn(
-                    'w-full flex items-center gap-3 rounded-xl px-3 py-3 transition-all duration-200',
+                    'flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200',
                     isModuleActive
-                      ? 'bg-sidebar-accent/60 text-white'
-                      : 'text-sidebar-foreground hover:bg-sidebar-accent/40 hover:text-white'
+                      ? 'bg-sidebar-accent text-sidebar-primary'
+                      : 'text-sidebar-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground'
                   )}
                 >
-                  <Icon
-                    className={cn(
-                      'h-5 w-5 flex-shrink-0 stroke-[2.5]',
-                      isModuleActive ? 'text-cyan-400' : 'text-slate-500 group-hover:text-cyan-400'
-                    )}
-                  />
+                  <Icon className="h-5 w-5 flex-shrink-0" />
                   {!collapsed && (
-                    <span className="text-sm font-bold truncate flex-1 text-left">{module}</span>
+                    <>
+                      <span className="flex-1 text-left">{moduleName}</span>
+                      <ChevronDown
+                        className={cn(
+                          'h-4 w-4 transition-transform duration-200',
+                          isModuleActive ? 'rotate-180' : ''
+                        )}
+                      />
+                    </>
                   )}
                 </button>
 
-                {/* Subcategories — expanded when module is active, hover when collapsed */}
-                {!collapsed ? (
-                  <div
-                    className={cn(
-                      'ml-8 overflow-hidden transition-all duration-300',
-                      isModuleActive ? 'max-h-[500px] mt-1 mb-1' : 'max-h-0 group-hover:max-h-[500px] group-hover:mt-1'
-                    )}
-                  >
-                    {subcategories.map((sub) => {
-                      const isSubActive = isModuleActive && activeSubcategory === sub;
+                {/* Subcategories */}
+                {!collapsed && isModuleActive && (
+                  <div className="mt-1 ml-4 space-y-0.5 border-l border-sidebar-border pl-3">
+                    {subs.map((sub: string) => {
+                      const isSubActive = activeSubcategory === sub;
                       return (
                         <button
                           key={sub}
-                          onClick={() => handleSubcategoryClick(module, sub)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigate(`/citizen?category=${encodeURIComponent(moduleName)}&sub=${encodeURIComponent(sub)}`);
+                          }}
                           className={cn(
-                            'w-full flex items-center gap-3 py-2 px-2 rounded-lg text-left transition-all duration-150',
+                            'flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[13px] transition-all duration-150',
                             isSubActive
-                              ? 'text-cyan-400 font-semibold'
-                              : 'text-slate-400 hover:text-cyan-400'
+                              ? 'font-semibold text-primary'
+                              : 'text-sidebar-foreground/70 hover:text-primary'
                           )}
                         >
                           <div
                             className={cn(
-                              'rounded-full flex-shrink-0 w-2 h-2',
-                              isSubActive
-                                ? 'bg-cyan-400 shadow-[0_0_6px_rgba(34,211,238,0.6)]'
-                                : 'bg-slate-600'
+                              'h-1.5 w-1.5 flex-shrink-0 rounded-full',
+                              isSubActive ? 'bg-primary' : 'bg-sidebar-border'
                             )}
                           />
-                          <span className="text-[13px] leading-tight">{sub}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  /* Collapsed: Fly-out tooltip panel */
-                  <div className="absolute left-[64px] top-0 w-56 bg-[#1e293b] border border-slate-700 rounded-xl p-3 hidden group-hover:block shadow-2xl z-[60]">
-                    <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest px-2 py-1.5 mb-1 border-b border-slate-800">
-                      {module}
-                    </div>
-                    {subcategories.map((sub) => {
-                      const isSubActive = isModuleActive && activeSubcategory === sub;
-                      return (
-                        <button
-                          key={sub}
-                          onClick={() => handleSubcategoryClick(module, sub)}
-                          className={cn(
-                            'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-all duration-150 text-sm font-medium',
-                            isSubActive
-                              ? 'bg-slate-800 text-cyan-400'
-                              : 'text-slate-300 hover:bg-slate-800 hover:text-cyan-400'
-                          )}
-                        >
-                          <div
-                            className={cn(
-                              'rounded-full flex-shrink-0 w-2 h-2',
-                              isSubActive ? 'bg-cyan-400' : 'bg-cyan-500/40'
-                            )}
-                          />
-                          {sub}
+                          <span className="truncate leading-tight">{sub}</span>
                         </button>
                       );
                     })}
@@ -302,23 +259,59 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           })}
         </div>
 
-        {/* Bottom links */}
+        {/* Reports & Analytics */}
         <div className="px-2 mt-4 space-y-0.5">
-          <NavLink
-            to="/reports"
-            className={({ isActive }) =>
-              cn(
-                'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200',
-                isActive
-                  ? 'bg-sidebar-accent text-sidebar-primary'
-                  : 'text-sidebar-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground'
-              )
-            }
+          <button
+            onClick={() => {
+              if (!collapsed) setReportsExpanded(prev => !prev);
+              navigate('/reports');
+            }}
+            className={cn(
+              'w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200',
+              location.pathname === '/reports'
+                ? 'bg-sidebar-accent text-sidebar-primary'
+                : 'text-sidebar-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground'
+            )}
           >
             <BarChart3 className="h-5 w-5 flex-shrink-0" />
-            {!collapsed && <span>Reports & Analytics</span>}
-          </NavLink>
+            {!collapsed && (
+              <>
+                <span className="flex-1 text-left">Reports &amp; Analytics</span>
+                <ChevronDown
+                  className={cn(
+                    'h-4 w-4 transition-transform duration-200',
+                    reportsExpanded ? 'rotate-180' : ''
+                  )}
+                />
+              </>
+            )}
+          </button>
 
+          {/* Report categories dropdown under Reports & Analytics */}
+          {!collapsed && reportsExpanded && (
+            <div className="ml-4 mt-1 space-y-0.5 border-l border-sidebar-border pl-3">
+              {[
+                { label: 'Citizen Satisfaction', tab: 'satisfaction' },
+                { label: 'Complaint Details',    tab: 'details' },
+                { label: 'Officer',              tab: 'officers' },
+              ].map(({ label, tab }) => {
+                const isActive = location.pathname === '/reports' && location.hash === `#${tab}`;
+                return (
+                  <button
+                    key={tab}
+                    onClick={() => navigate(`/reports#${tab}`)}
+                    className={cn(
+                      'w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left transition-all duration-150 text-sm',
+                      isActive ? 'text-cyan-400 font-semibold' : 'text-slate-400 hover:text-cyan-400'
+                    )}
+                  >
+                    <div className={cn('rounded-full flex-shrink-0 w-2 h-2', isActive ? 'bg-cyan-400' : 'bg-slate-600')} />
+                    <span className="text-[13px] leading-tight">{label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
       </nav>
 
