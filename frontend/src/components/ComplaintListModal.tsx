@@ -22,33 +22,44 @@ export function ComplaintListModal({ isOpen, onClose, title, timeRange, selected
   useEffect(() => {
     if (!isOpen) return;
 
-    const applyStatusFilter = (list: DBComplaint[]) => {
-      if (!statusFilter || statusFilter === 'all') return list;
-      return list.filter(c => {
-        const s = (c.status || '').toUpperCase();
-        if (statusFilter === 'Resolved') return s === 'RESOLVED' || s === 'COMPLETED' || s === 'ACCEPTED';
-        if (statusFilter === 'Pending' || statusFilter === 'Submitted')
-          return s === 'SUBMITTED' || s === 'PENDING' || s === 'ASSIGNED' || s === 'STANDBY';
-        if (statusFilter === 'In Progress') return s === 'IN PROGRESS' || s === 'IN_PROGRESS' || s === 'WIP' || s === 'RUNNING';
-        if (statusFilter === 'Rejected') return s === 'REJECTED' || s === 'FAULT' || s === 'POOR';
-        // fallback: case-insensitive match
-        return s === statusFilter.toUpperCase();
-      });
+    const filterComplaints = (list: DBComplaint[]) => {
+      let filtered = [...list];
+
+      if (timeRange === 'today') {
+        const targetDate = selectedDate || new Date().toISOString().split('T')[0];
+        filtered = filtered.filter(c => {
+          const createdDate = c.created_at ? c.created_at.split('T')[0] : '';
+          const resolvedDate = c.resolved_at ? c.resolved_at.split('T')[0] : '';
+          return createdDate === targetDate || resolvedDate === targetDate;
+        });
+      }
+
+      if (statusFilter && statusFilter !== 'all') {
+        filtered = filtered.filter(c => {
+          const s = (c.status || '').toUpperCase();
+          if (statusFilter === 'Resolved') return s === 'RESOLVED' || s === 'COMPLETED' || s === 'ACCEPTED';
+          if (statusFilter === 'Pending' || statusFilter === 'Submitted')
+            return s === 'SUBMITTED' || s === 'PENDING' || s === 'ASSIGNED' || s === 'STANDBY';
+          if (statusFilter === 'In Progress') return s === 'IN PROGRESS' || s === 'IN_PROGRESS' || s === 'WIP' || s === 'RUNNING';
+          if (statusFilter === 'Rejected') return s === 'REJECTED' || s === 'FAULT' || s === 'POOR';
+          return s === statusFilter.toUpperCase();
+        });
+      }
+
+      return filtered;
     };
 
     if (complaintsList && Array.isArray(complaintsList)) {
-      setComplaints(applyStatusFilter(complaintsList));
+      setComplaints(filterComplaints(complaintsList));
       return;
     }
 
     const fetchComplaints = async () => {
       setLoading(true);
       try {
-        // Always fetch with date when provided (for 'today' filter)
-        // For 'all-time', fetch without date to get all records
         const fetchDate = timeRange === 'today' ? selectedDate : undefined;
         const data = await getComplaints(fetchDate);
-        setComplaints(applyStatusFilter(data || []));
+        setComplaints(filterComplaints(data || []));
       } catch (err) {
         console.error('Failed to fetch complaints for modal', err);
         setComplaints([]);

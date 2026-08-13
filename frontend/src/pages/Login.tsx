@@ -30,16 +30,25 @@ const Login = () => {
       if (res.ok) {
         const data = await res.json();
         const todayStr = new Date().toISOString().split('T')[0];
-        localStorage.setItem("selectedDate", todayStr);
-        localStorage.setItem("selectedEndDate", todayStr);
-        localStorage.setItem("user", JSON.stringify({ 
+        const userObj = JSON.stringify({ 
           username: data.username || username, 
           role: data.role, 
           modules: data.modules 
-        }));
+        });
+        sessionStorage.setItem("selectedDate", todayStr);
+        sessionStorage.setItem("selectedEndDate", todayStr);
+        sessionStorage.setItem("user", userObj);
+        sessionStorage.setItem("user_role", data.role || "");
+        sessionStorage.setItem("username", data.username || username);
+        if (data.token) {
+          sessionStorage.setItem("auth_token", data.token);
+        }
+
+        localStorage.setItem("selectedDate", todayStr);
+        localStorage.setItem("selectedEndDate", todayStr);
+        localStorage.setItem("user", userObj);
         localStorage.setItem("user_role", data.role || "");
         localStorage.setItem("username", data.username || username);
-        // Save JWT token for API authentication
         if (data.token) {
           localStorage.setItem("auth_token", data.token);
         }

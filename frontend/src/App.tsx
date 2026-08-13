@@ -14,9 +14,9 @@ import Login from "./pages/Login";
 
 const queryClient = new QueryClient();
 
-// 🔐 SIMPLE LOGIN CHECK
+// 🔐 SIMPLE LOGIN CHECK (Session-based)
 const isLoggedIn = () => {
-  return localStorage.getItem("user") !== null;
+  return sessionStorage.getItem("user") !== null;
 };
 
 const App = () => (

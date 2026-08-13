@@ -44,7 +44,7 @@ export function AssignOfficerModal({ isOpen, onClose, assignedByRole }: AssignOf
 
     try {
       const assignedBy = team === 'field' ? 'ae1' : 'ae2';
-      const token = localStorage.getItem('auth_token');
+      const token = sessionStorage.getItem('auth_token') || localStorage.getItem('auth_token');
       const res = await fetch(`${API_BASE_URL}/YXNzaWduLW9mZmljZXI`, {
         method: 'POST',
         headers: { 

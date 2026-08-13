@@ -454,6 +454,11 @@ func GetAllComplaints(db *sql.DB, dateFilter string, role string) ([]models.Comp
 		query += ` AND module_id IN (4, 5)`
 	}
 
+	if dateFilter != "" {
+		args = append(args, dateFilter)
+		query += fmt.Sprintf(` AND (DATE(created_at) = $%d OR DATE(updated_at) = $%d)`, len(args), len(args))
+	}
+
 	rows, err := db.Query(query, args...)
 	if err != nil {
 		return nil, err

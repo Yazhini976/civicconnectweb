@@ -2,9 +2,9 @@
 // Set VITE_API_BASE_URL in your .env file (e.g. https://your-backend.com/api)
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8082/api';
 
-// Returns Authorization header with JWT token from localStorage
+// Returns Authorization header with JWT token from sessionStorage/localStorage
 function getAuthHeaders(): HeadersInit {
-  const token = localStorage.getItem("auth_token");
+  const token = sessionStorage.getItem("auth_token") || localStorage.getItem("auth_token");
   return token
     ? { "Content-Type": "application/json", "Authorization": `Bearer ${token}` }
     : { "Content-Type": "application/json" };
@@ -95,10 +95,10 @@ export const getStationCounts = async () => { return { total: 0, lifting: 0, pum
 
 export function getUserRole() {
   try {
-    const userRole = localStorage.getItem("user_role");
+    const userRole = sessionStorage.getItem("user_role") || localStorage.getItem("user_role");
     if (userRole) return userRole;
 
-    const userStr = localStorage.getItem("user");
+    const userStr = sessionStorage.getItem("user") || localStorage.getItem("user");
     if (userStr) {
       if (userStr.startsWith("{")) {
         const parsed = JSON.parse(userStr);

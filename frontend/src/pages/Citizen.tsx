@@ -415,6 +415,29 @@ export default function Citizen() {
     return data;
   }, [officerFilteredComplaints, activeTab]);
 
+  /* ---- Dynamic Titles Based on selectedDate ---- */
+  const isTodaySelected = useMemo(() => {
+    const todayStr = new Date().toISOString().split('T')[0];
+    return selectedDate === todayStr;
+  }, [selectedDate]);
+
+  const formattedDateStr = useMemo(() => {
+    if (!selectedDate) return '';
+    try {
+      const [y, m, d] = selectedDate.split('-');
+      const dateObj = new Date(parseInt(y, 10), parseInt(m, 10) - 1, parseInt(d, 10));
+      return format(dateObj, 'dd MMM yyyy');
+    } catch (e) {
+      return selectedDate;
+    }
+  }, [selectedDate]);
+
+  const sectionHeading = isTodaySelected ? "Today's Complaints" : `Complaints (${formattedDateStr})`;
+  const totalCardTitle = isTodaySelected ? "Complaints Made Today" : `Complaints Made (${formattedDateStr})`;
+  const resolvedCardTitle = isTodaySelected ? "Resolved Today" : `Resolved (${formattedDateStr})`;
+  const pendingCardTitle = isTodaySelected ? "Pending Today" : `Pending (${formattedDateStr})`;
+  const inProgressCardTitle = isTodaySelected ? "In Progress Today" : `In Progress (${formattedDateStr})`;
+
   /* ---- KPI Counts (Filtered by selectedDate & selectedWard) ---- */
   const totalCount = officerFilteredComplaints.length;
   const resolvedCount = officerFilteredComplaints.filter(c => c.status === 'Resolved' || c.status === 'Completed').length;
@@ -650,14 +673,14 @@ export default function Citizen() {
           </div>
 
           {/* =======================
-              KPI CARDS (TODAY)
+              KPI CARDS (DYNAMIC DATE)
               ======================= */}
-          <h2 className="mb-4 text-xl font-bold tracking-tight">Today's Complaints</h2>
+          <h2 className="mb-4 text-xl font-bold tracking-tight">{sectionHeading}</h2>
       <div className="mb-8 grid gap-4 grid-cols-2">
-        <KPICard title="Complaints Made Today" value={totalCount} icon={<Users />} onClick={() => openListModal("Today's Complaints", 'today', 'all')} />
-        <KPICard title="Resolved Today" value={resolvedCount} variant="success" icon={<CheckCircle2 />} onClick={() => openListModal('Resolved Today', 'today', 'Resolved')} />
-        <KPICard title="Pending Today" value={pendingCount} variant="warning" icon={<Clock />} onClick={() => openListModal('Pending Today', 'today', 'Pending')} />
-        <KPICard title="In Progress Today" value={inProgressCount} variant="info" icon={<Zap />} onClick={() => openListModal('In Progress Today', 'today', 'In Progress')} />
+        <KPICard title={totalCardTitle} value={totalCount} icon={<Users />} onClick={() => openListModal(totalCardTitle, 'today', 'all')} />
+        <KPICard title={resolvedCardTitle} value={resolvedCount} variant="success" icon={<CheckCircle2 />} onClick={() => openListModal(resolvedCardTitle, 'today', 'Resolved')} />
+        <KPICard title={pendingCardTitle} value={pendingCount} variant="warning" icon={<Clock />} onClick={() => openListModal(pendingCardTitle, 'today', 'Pending')} />
+        <KPICard title={inProgressCardTitle} value={inProgressCount} variant="info" icon={<Zap />} onClick={() => openListModal(inProgressCardTitle, 'today', 'In Progress')} />
       </div>
 
       <div className="mb-6">
@@ -697,6 +720,7 @@ export default function Citizen() {
         timeRange={modalTimeRange}
         selectedDate={selectedDate}
         statusFilter={modalStatus}
+        complaintsList={officerFilteredComplaints}
       />
     </DashboardLayout>
   );
